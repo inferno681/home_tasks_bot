@@ -1,0 +1,121 @@
+name: main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.12
+      - name: Install dependencies
+        run: uv sync
+      - name: Run pytest
+        run: uv run pytest --cov --cov-report term-missing --junitxml=junit.xml --cov-report=xml
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    name: Lint (flake8 + isort + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.12
+      - name: Install dependencies
+        run: uv sync
+      - name: flake8
+        run: uv run flake8 .
+      - name: isort
+        run: uv run isort --check-only .
+      - name: mypy
+        run: uv run mypy .
+
+  build_and_push_to_docker_hub:
+    name: Push Docker image to DockerHub
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - lint
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Push to DockerHub
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.CONTAINER_NAME }}:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - build_and_push_to_docker_hub
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Copy docker-compose.yml via ssh
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "infra/docker-compose-prod.yaml"
+          target: ${{ secrets.PROJECT_NAME }}
+      - name: Executing remote ssh commands to deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          script: |
+            cd ${{ secrets.PROJECT_NAME }}
+            mv ./infra/docker-compose-prod.yaml .
+            rmdir infra/
+            echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            sudo docker compose -f docker-compose-prod.yaml pull
+            sudo docker compose -f docker-compose-prod.yaml down
+            sudo docker compose -f docker-compose-prod.yaml up -d
+
+  send_message:
+    name: Send message
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - lint
+      - build_and_push_to_docker_hub
+      - deploy
+    steps:
+      - name: Send message
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            ${{ github.actor }} выполнил слияние в ветку "main" ${{ github.event.commits[0].message }}!
+            Обновленный проект развернут на сервере!
+            Ссылка на коммит - https://github.com/${{ github.repository }}/commit/${{github.sha}}

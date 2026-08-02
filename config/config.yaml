@@ -1,0 +1,16 @@
+service:
+  webhook: false
+  web_server_host: "0.0.0.0"
+  web_server_port: 8000
+  webhook_path: /webhook
+  base_webhook_url: ""
+
+mongodb:
+  db: home_tasks
+
+scheduler:
+  interval_seconds: 60
+
+logger:
+  level: "INFO"
+  format: "[%(asctime)s.%(msecs)03d] %(name)-25s %(levelname)-7s - %(message)s"
