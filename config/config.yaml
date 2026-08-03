@@ -11,6 +11,17 @@ mongodb:
 scheduler:
   interval_seconds: 60
 
+# storage: memory (по умолчанию, ничего не нужно) | redis | mongo (переиспользует
+# соединение к Atlas из bot/db.py, отдельная коллекция fsm.mongo_collection)
+fsm:
+  storage: "memory"
+  mongo_collection: "fsm_states"
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+
 logger:
   level: "INFO"
   format: "[%(asctime)s.%(msecs)03d] %(name)-25s %(levelname)-7s - %(message)s"

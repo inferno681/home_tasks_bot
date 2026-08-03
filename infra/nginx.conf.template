@@ -1,0 +1,48 @@
+# Реверс-прокси перед aiohttp-сервером бота (нужен только при service.webhook: true
+# в config/config.yaml — при polling этот файл не используется).
+# Рендерится через envsubst: DOMAIN, WEBHOOK_PATH (= service.webhook_path),
+# BOT_HOST/BOT_PORT (= service.web_server_host/web_server_port, обычно 127.0.0.1:8000
+# при публикации порта контейнера на хост).
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+    server_tokens off;
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    keepalive_timeout 15s;
+    send_timeout 10s;
+    client_max_body_size 1m;
+
+    limit_conn webhook_conn 20;
+
+    # Только путь вебхука; Telegram всегда шлёт POST с JSON-апдейтом.
+    location = ${WEBHOOK_PATH} {
+        limit_req zone=webhook_limit burst=20 nodelay;
+        limit_except POST {
+            deny all;
+        }
+
+        proxy_pass http://${BOT_HOST}:${BOT_PORT}${WEBHOOK_PATH};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Больше эндпоинтов у бота нет — не давать сканерам ничего нащупать.
+    location / {
+        return 404;
+    }
+}

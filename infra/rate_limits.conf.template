@@ -1,0 +1,5 @@
+limit_req_zone $binary_remote_addr zone=webhook_limit:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=webhook_conn:10m;
+
+limit_req_status 429;
+limit_conn_status 429;

@@ -2,6 +2,9 @@ services:
 
   home_tasks_bot:
     container_name: home_tasks_bot
+    # DOCKERHUB_USERNAME/CONTAINER_NAME подставляются из .env.deploy, который
+    # CI генерирует на сервере из GitHub-секретов перед `docker compose`
+    # (.github/workflows/main.yml, job deploy) — не из основного .env.
     image: ${DOCKERHUB_USERNAME}/${CONTAINER_NAME}:latest
     init: true
     restart: always

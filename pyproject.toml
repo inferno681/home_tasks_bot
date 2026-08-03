@@ -10,18 +10,27 @@ dependencies = [
     "beanie>=2.1.0",
     "pydantic-settings>=2.12.0",
     "pyyaml>=6.0.3",
+    "redis>=5.0.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
     "flake8>=7.3.0",
     "wemake-python-styleguide>=1.0.0",
     "isort>=6.0.0",
     "mypy>=1.15.0",
     "types-pyyaml>=6.0.12.20250915",
+    "pip-audit>=2.7.0",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+asyncio_mode = "auto"
+# pymongo's AsyncMongoClient is bound to the event loop it was created on;
+# the session-scoped mongo_db fixture needs one shared loop, not a fresh
+# one per test (pytest-asyncio's default).
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

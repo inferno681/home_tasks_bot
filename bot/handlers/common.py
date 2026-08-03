@@ -1,29 +1,18 @@
-import re
-
 from aiogram import F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from beanie.operators import Set
 
+from bot.constants import MAIN_MENU_LABELS, MENU_HELP
+from bot.deeplinks import resolve_pending_action
+from bot.enums import Messages
 from bot.keyboards import main_menu_kb
 from bot.models import User
+from bot.timeutils import parse_utc_offset
 
 router = Router()
-
-# ponytail: фиксированное смещение вместо zoneinfo — не учитывает переход на
-# летнее/зимнее время; апгрейд на IANA-таймзону, если это станет проблемой.
-OFFSET_RE = re.compile(r"^([+-])(\d{1,2})(?::(\d{2}))?$")
-
-WELCOME = (
-    "Привет! Я помогу отслеживать домашние дела.\n\n"
-    "/new — добавить задачу (текст, фото или оба)\n"
-    "/list — список открытых задач\n"
-    "/share <id задачи> <@username> — расшарить задачу\n"
-    "/assign <id задачи> <@username> — назначить ответственного\n"
-    "/help — помощь"
-)
 
 
 class SetTimezone(StatesGroup):
@@ -42,36 +31,45 @@ async def ensure_timezone(message: Message, state: FSMContext) -> bool:
         return True
 
     await state.set_state(SetTimezone.waiting_offset)
-    await message.answer(
-        "Сначала укажи свой часовой пояс как смещение от UTC (например +3 "
-        "или -5) — так напоминания будут приходить вовремя. После этого "
-        "повтори команду."
-    )
+    await message.answer(Messages.ASK_TIMEZONE)
     return False
 
 
+async def _show_pending_action(message: Message, payload: str) -> None:
+    """Render the share/assign/pool-invite a /start deep-link carried."""
+    resolved = await resolve_pending_action(payload)
+    if resolved is None:
+        return
+    text, markup = resolved
+    await message.answer(text, reply_markup=markup)
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(
+    message: Message,
+    state: FSMContext,
+    command: CommandObject = CommandObject(command="start"),
+):
+    payload = (command.args or "").strip() or None
     if not await ensure_timezone(message, state):
+        if payload:
+            await state.update_data(pending_payload=payload)
         return
-    await message.answer(WELCOME, reply_markup=main_menu_kb())
+    await message.answer(Messages.WELCOME, reply_markup=main_menu_kb())
+    if payload:
+        await _show_pending_action(message, payload)
 
 
-@router.message(SetTimezone.waiting_offset, F.text)
+@router.message(
+    SetTimezone.waiting_offset, F.text, ~F.text.in_(MAIN_MENU_LABELS)
+)
 async def set_timezone(message: Message, state: FSMContext):
-    m = OFFSET_RE.match(message.text.strip())
-    if not m:
-        await message.answer("Не понял. Пример: +3 или +5:30 или -5.")
+    offset_minutes = parse_utc_offset(message.text)
+    if offset_minutes is None:
+        await message.answer(Messages.INVALID_OFFSET)
         return
 
-    sign, hh, mm = m.groups()
-    sign_multiplier = 1 if sign == "+" else -1
-    total_minutes = int(hh) * 60 + int(mm or 0)
-    offset_minutes = sign_multiplier * total_minutes
-    if not -12 * 60 <= offset_minutes <= 14 * 60:
-        await message.answer("Смещение должно быть в пределах -12:00..+14:00.")
-        return
-
+    data = await state.get_data()
     await User.find_one(User.user_id == message.from_user.id).upsert(
         Set({User.utc_offset_minutes: offset_minutes}),
         on_insert=User(
@@ -81,18 +79,14 @@ async def set_timezone(message: Message, state: FSMContext):
         ),
     )
     await state.clear()
-    await message.answer("Часовой пояс сохранён.")
-    await message.answer(WELCOME, reply_markup=main_menu_kb())
+    await message.answer(Messages.TIMEZONE_SAVED)
+    await message.answer(Messages.WELCOME, reply_markup=main_menu_kb())
+    payload = data.get("pending_payload")
+    if payload:
+        await _show_pending_action(message, payload)
 
 
 @router.message(Command("help"))
+@router.message(F.text == MENU_HELP)
 async def cmd_help(message: Message):
-    await message.answer(
-        "/new — создать задачу. Пришли текст и/или фото, затем срок "
-        "(или 'нет').\n"
-        "/list [категория] — открытые задачи с кнопками отметки выполнения.\n"
-        "/share <id задачи> <@username> — расшарить задачу (id из /list).\n"
-        "/assign <id задачи> <@username> — назначить ответственного.\n"
-        "/cancel — отменить текущий диалог.",
-        reply_markup=main_menu_kb(),
-    )
+    await message.answer(Messages.HELP, reply_markup=main_menu_kb())

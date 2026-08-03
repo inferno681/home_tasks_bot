@@ -35,6 +35,21 @@ class SchedulerSettings(BaseModel):
     interval_seconds: int
 
 
+class FSMSettings(BaseModel):
+    """FSM storage backend settings."""
+
+    storage: Literal["memory", "redis", "mongo"]
+    mongo_collection: str
+
+
+class RedisSettings(BaseModel):
+    """Redis connection settings (used when fsm.storage == "redis")."""
+
+    host: str
+    port: int
+    db: int
+
+
 class Secrets(BaseSettings):
     """Secrets settings."""
 
@@ -42,6 +57,9 @@ class Secrets(BaseSettings):
     mongo_uri: SecretStr = Field(default=SecretStr(""), alias="MONGO_URI")
     webhook_secret: SecretStr = Field(
         default=SecretStr(""), alias="WEBHOOK_SECRET"
+    )
+    redis_password: SecretStr = Field(
+        default=SecretStr(""), alias="REDIS_PASSWORD"
     )
 
     @model_validator(mode="after")
@@ -71,6 +89,8 @@ class AppConfig(BaseSettings):
     service: ServiceSettings
     mongodb: MongoSettings
     scheduler: SchedulerSettings
+    fsm: FSMSettings
+    redis: RedisSettings
     logger: LoggerSettings
     secrets: Secrets
 
@@ -103,6 +123,16 @@ class AppConfig(BaseSettings):
     def webhook_url(self) -> str:
         """Public URL Telegram will send updates to."""
         return f"{self.service.base_webhook_url}{self.service.webhook_path}"
+
+    @property
+    def redis_url(self) -> str:
+        """Redis connection URL for aiogram's RedisStorage."""
+        password = self.secrets.redis_password.get_secret_value()
+        auth = f":{password}@" if password else ""
+        return (
+            f"redis://{auth}{self.redis.host}:"
+            f"{self.redis.port}/{self.redis.db}"
+        )
 
 
 config = AppConfig.load_settings(

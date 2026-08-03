@@ -2,7 +2,8 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.pymongo import PyMongoStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.webhook.aiohttp_server import (
     SimpleRequestHandler,
     setup_application,
@@ -10,7 +11,8 @@ from aiogram.webhook.aiohttp_server import (
 from aiohttp import web
 
 from bot.db import init_db
-from bot.handlers import common, list_tasks, new_task
+from bot.fsm_storage import build_fsm_storage
+from bot.handlers import common, list_tasks, new_task, pools, settings
 from bot.middlewares import UserTrackerMiddleware
 from bot.scheduler import setup_scheduler
 from config.config import config
@@ -21,12 +23,14 @@ logger = logging.getLogger(__name__)
 
 def setup_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     """Create the Bot and Dispatcher, wire routers and middleware."""
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=build_fsm_storage())
     dp.update.outer_middleware(UserTrackerMiddleware())
 
     dp.include_router(common.router)
     dp.include_router(new_task.router)
     dp.include_router(list_tasks.router)
+    dp.include_router(pools.router)
+    dp.include_router(settings.router)
 
     bot = Bot(token=config.secrets.bot_token.get_secret_value())
     return bot, dp
@@ -83,6 +87,11 @@ async def main():
     await init_db()
 
     bot, dp = setup_bot_and_dispatcher()
+    # RedisStorage.from_url() не подключается сразу — без явного ping
+    # неверный fsm.redis.host всплыл бы только на первом /start пользователя
+    # после деплоя, а не при старте контейнера.
+    if isinstance(dp.storage, RedisStorage):
+        await dp.storage.redis.ping()
 
     scheduler = setup_scheduler(bot)
     scheduler.start()
@@ -97,7 +106,14 @@ async def main():
             await start_polling(bot, dp)
     finally:
         logger.info("Shutting down")
+        # AsyncIOExecutor.shutdown() не умеет реально ждать job (см. его
+        # исходник: `wait` игнорируется, pending futures отменяются всегда) —
+        # поэтому с fsm.storage=mongo намеренно НЕ закрываем storage: это
+        # закрыло бы общий с bot/db.py клиент прямо под отменённым
+        # check_reminders. Процесс всё равно завершается следом.
         scheduler.shutdown(wait=False)
+        if not isinstance(dp.storage, PyMongoStorage):
+            await dp.storage.close()
         await bot.session.close()
 
 

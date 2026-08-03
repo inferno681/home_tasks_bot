@@ -1,14 +1,10 @@
 from datetime import datetime, timezone
-from enum import Enum
 from typing import List, Optional
 
-from beanie import Document, Indexed
+from beanie import Document, Indexed, PydanticObjectId
 from pydantic import Field
 
-
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    DONE = "done"
+from bot.enums import TaskStatus
 
 
 class Task(Document):
@@ -25,6 +21,8 @@ class Task(Document):
 
     category: Optional[str] = None
     assigned_to: Optional[int] = None
+    # None = личная задача, видна только user_id (+ shared_with)
+    pool_id: Optional[PydanticObjectId] = None
 
     # ровно одно из двух, либо ни одного — контролируется на уровне FSM
     repeat_every_days: Optional[int] = None
@@ -41,5 +39,29 @@ class User(Document):
     username: Optional[str] = None
     utc_offset_minutes: Optional[int] = None  # None = ещё не спрошено
 
+    # Пул, в который попадают новые задачи по умолчанию; None = личные.
+    default_pool_id: Optional[PydanticObjectId] = None
+    # Спрашивать пул явно при /new, а не молча брать default_pool_id.
+    ask_pool_on_create: bool = False
+
     class Settings:
         name = "users"
+
+
+class Pool(Document):
+    name: str
+    members: List[int] = Field(default_factory=list)
+    created_by: int
+
+    class Settings:
+        name = "pools"
+
+    @property
+    def short_id(self) -> str:
+        """Last 6 hex chars of the id — enough to disambiguate same-named
+        pools without asking the user to paste a full ObjectId."""
+        return str(self.id)[-6:]
+
+    @property
+    def label(self) -> str:
+        return f"{self.name} #{self.short_id}"

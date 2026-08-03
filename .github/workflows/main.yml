@@ -9,6 +9,11 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
     steps:
       - uses: actions/checkout@v6
       - name: Install uv
@@ -19,6 +24,8 @@ jobs:
         run: uv sync
       - name: Run pytest
         run: uv run pytest --cov --cov-report term-missing --junitxml=junit.xml --cov-report=xml
+        env:
+          TEST_MONGO_URI: mongodb://localhost:27017
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -46,6 +53,8 @@ jobs:
         run: uv run isort --check-only .
       - name: mypy
         run: uv run mypy .
+      - name: pip-audit
+        run: uv run pip-audit
 
   build_and_push_to_docker_hub:
     name: Push Docker image to DockerHub
@@ -96,10 +105,12 @@ jobs:
             cd ${{ secrets.PROJECT_NAME }}
             mv ./infra/docker-compose-prod.yaml .
             rmdir infra/
+            echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" > .env.deploy
+            echo "CONTAINER_NAME=${{ secrets.CONTAINER_NAME }}" >> .env.deploy
             echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            sudo docker compose -f docker-compose-prod.yaml pull
-            sudo docker compose -f docker-compose-prod.yaml down
-            sudo docker compose -f docker-compose-prod.yaml up -d
+            sudo docker compose --env-file .env.deploy -f docker-compose-prod.yaml pull
+            sudo docker compose --env-file .env.deploy -f docker-compose-prod.yaml down
+            sudo docker compose --env-file .env.deploy -f docker-compose-prod.yaml up -d
 
   send_message:
     name: Send message
