@@ -148,6 +148,7 @@ class Messages(StrEnum):
     EDIT_TEXT_PROMPT = "Пришли новый текст, фото или фото с подписью."
     TASK_TEXT_UPDATED = "Текст обновлён ✅"
     EDIT_NEEDS_DEADLINE = "Сначала укажи срок — через пункт «Срок»."
+    EDIT_POOL_OWNER_ONLY = "Менять пул можно только у своих задач."
 
     REMINDER = "⏰ Напоминание: {text}"
 

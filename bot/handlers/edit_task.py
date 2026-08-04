@@ -208,6 +208,13 @@ async def cb_edit_field_picked(callback: CallbackQuery, state: FSMContext):
     if field == EDIT_FIELD_REPEAT and not task.due_at:
         await callback.answer(Messages.EDIT_NEEDS_DEADLINE, show_alert=True)
         return
+    # Смена пула меняет, кто вообще видит задачу — в отличие от текста/
+    # категории/срока/повтора это не "правка контента", а изменение границы
+    # доступа, поэтому в отличие от них доступно только владельцу (как
+    # /share и /assign), а не любому, кто просто авторизован на задачу.
+    if field == EDIT_FIELD_POOL and task.user_id != callback.from_user.id:
+        await callback.answer(Messages.EDIT_POOL_OWNER_ONLY, show_alert=True)
+        return
 
     await callback.answer()
     await _FIELD_STEPS[field](callback, state)
@@ -514,6 +521,15 @@ async def edit_weekdays_back(callback: CallbackQuery, state: FSMContext):
     EditTask.waiting_pool, F.data.startswith(CB_TASK_POOL_PREFIX)
 )
 async def edit_pool_picked(callback: CallbackQuery, state: FSMContext):
+    # Дублирует проверку из cb_edit_field_picked — на случай, если этот шаг
+    # когда-нибудь станет достижим другим путём, сама смена пула не должна
+    # оставаться доступной не-владельцу.
+    task = await _own_task(state, callback.from_user.id)
+    if task and task.user_id != callback.from_user.id:
+        await callback.answer(Messages.EDIT_POOL_OWNER_ONLY, show_alert=True)
+        await state.clear()
+        return
+
     raw = callback.data.split(":", 1)[1]
     pool_id = None if raw == POOL_NONE else PydanticObjectId(raw)
     label = await pool_label(pool_id)

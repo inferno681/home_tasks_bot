@@ -356,6 +356,55 @@ async def test_edit_pool_back_to_personal(mongo_db):
     assert (await Task.get(task.id)).pool_id is None
 
 
+async def test_field_menu_blocks_pool_edit_for_non_owner(mongo_db):
+    """Regression: only the owner may reassign a task's pool — a shared_with
+    (non-owner, non-pool-member) editor moving it into their own pool would
+    silently grant that pool's members access and could hide the task from
+    its real owner."""
+    owner_pool = await Pool(
+        name="OwnerPool", members=[1], created_by=1
+    ).insert()
+    task = await Task(
+        user_id=1, text="chore", pool_id=owner_pool.id, shared_with=[2]
+    ).insert()
+    state = await _editing(task.id, user_id=2)
+    callback = _callback(2, "editf:pool")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_field
+    callback.answer.assert_awaited_once_with(
+        Messages.EDIT_POOL_OWNER_ONLY, show_alert=True
+    )
+
+
+async def test_edit_pool_picked_denies_non_owner_even_if_state_reached(
+    mongo_db,
+):
+    """Defense in depth: even if waiting_pool were reached some other way,
+    the terminal handler itself must still refuse a non-owner."""
+    owner_pool = await Pool(
+        name="OwnerPool", members=[1], created_by=1
+    ).insert()
+    other_pool = await Pool(
+        name="Charlie's", members=[2], created_by=2
+    ).insert()
+    task = await Task(
+        user_id=1, text="chore", pool_id=owner_pool.id, shared_with=[2]
+    ).insert()
+    state = _fsm(2)
+    await state.set_state(EditTask.waiting_pool)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(2, f"task_pool:{other_pool.id}")
+
+    await edit_pool_picked(callback, state)
+
+    assert (await Task.get(task.id)).pool_id == owner_pool.id
+    callback.answer.assert_awaited_once_with(
+        Messages.EDIT_POOL_OWNER_ONLY, show_alert=True
+    )
+
+
 async def test_edit_denied_if_task_deleted_mid_flow(mongo_db):
     task = await Task(user_id=1, text="chore").insert()
     state = _fsm(1)
