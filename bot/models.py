@@ -13,6 +13,7 @@ class Task(Document):
     photo_file_id: Optional[str] = None
     due_at: Optional[datetime] = None
     status: TaskStatus = TaskStatus.PENDING
+    completed_at: Optional[datetime] = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

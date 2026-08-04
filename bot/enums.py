@@ -18,6 +18,7 @@ class Messages(StrEnum):
         "Привет! Я помогу отслеживать домашние дела.\n\n"
         "/new — добавить задачу (текст, фото или оба)\n"
         "/list — список открытых задач\n"
+        "/history — история выполненных задач\n"
         "/share <id задачи> <@username> — расшарить задачу\n"
         "/assign <id задачи> <@username> — назначить ответственного\n"
         "/newpool <название>, /invite, /pools, /leave — общий пул задач\n"
@@ -38,6 +39,7 @@ class Messages(StrEnum):
         "(или 'нет').\n"
         "/list [категория] — открытые задачи с кнопками отметки "
         "выполнения/удаления/изменения.\n"
+        "/history — выполненные задачи постранично, начиная с последней.\n"
         "/share <id задачи> <@username> — предложить расшарить задачу (id "
         "из /list, нужно подтверждение второй стороны).\n"
         "/assign <id задачи> <@username> — предложить назначить "
@@ -105,6 +107,9 @@ class Messages(StrEnum):
     LAST_DONE_LINE = "✅ последний раз: {when}"
 
     NO_OPEN_TASKS = "Открытых задач нет."
+    HISTORY_EMPTY = "История пуста."
+    HISTORY_TITLE = "📜 История задач (стр. {page}/{pages})"
+    HISTORY_DONE_AT = "✅ {when}"
     SHARE_FORMAT = "Формат: /share <id задачи из /list> <@username>"
     ASSIGN_FORMAT = "Формат: /assign <id задачи из /list> <@username>"
     TASK_NOT_FOUND = "Нет задачи с таким id. Посмотри /list."
@@ -142,6 +147,7 @@ class Messages(StrEnum):
     ASSIGN_DECLINE_NOTIFY = "@{username} отклонил(а) назначение."
     TASK_RESCHEDULED = "Сделано! Повторю в следующий раз ✅"
     TASK_DONE = "Отмечено как сделано ✅"
+    TASK_REPEAT_FINISHED = "Повтор завершён, задача выполнена ✅"
     TASK_DELETED = "Удалено 🗑"
 
     EDIT_MENU_TITLE = "Что изменить?"

@@ -15,6 +15,7 @@ from bot.constants import (
     CB_SHARE_DECLINE_PREFIX,
     CB_TASK_DELETE_PREFIX,
     CB_TASK_DONE_PREFIX,
+    CB_TASK_FINISH_PREFIX,
     MENU_ASSIGN,
     MENU_LIST,
     MENU_SHARE,
@@ -59,6 +60,12 @@ async def _open_tasks_for(
     if category:
         conditions.append(Task.category == category)
     return await Task.find(*conditions).sort("+due_at").to_list()
+
+
+def _is_recurring(task: Task) -> bool:
+    return bool(
+        task.due_at and (task.repeat_every_days or task.repeat_weekdays)
+    )
 
 
 async def _caption(task: Task, offset: int) -> str:
@@ -119,7 +126,7 @@ async def cmd_list(
 
     for task in tasks:
         caption = await _caption(task, offset)
-        kb = task_actions_kb(str(task.id))
+        kb = task_actions_kb(str(task.id), _is_recurring(task))
         if task.photo_file_id:
             await message.answer_photo(
                 task.photo_file_id, caption=caption, reply_markup=kb
@@ -328,7 +335,7 @@ async def cb_done(callback: CallbackQuery):
         await callback.answer(Messages.NO_ACCESS, show_alert=True)
         return
 
-    if task.due_at and (task.repeat_every_days or task.repeat_weekdays):
+    if _is_recurring(task):
         new_due = next_due_date(
             task.due_at, task.repeat_every_days, task.repeat_weekdays
         )
@@ -341,9 +348,39 @@ async def cb_done(callback: CallbackQuery):
         await safe_edit_reply_markup(callback.message)
         return
 
-    await task.update(Set({Task.status: TaskStatus.DONE}))
+    await task.update(
+        Set(
+            {
+                Task.status: TaskStatus.DONE,
+                Task.completed_at: datetime.now(timezone.utc),
+            }
+        )
+    )
     logger.info(f"Task {task.id} marked done by {uid}")
     await callback.answer(Messages.TASK_DONE)
+    await safe_edit_reply_markup(callback.message)
+
+
+@router.callback_query(F.data.startswith(CB_TASK_FINISH_PREFIX))
+async def cb_finish_recurring(callback: CallbackQuery):
+    task_id = callback.data.split(":", 1)[1]
+    task = await get_task(task_id)
+    uid = callback.from_user.id
+    if not task or not await is_task_authorized(task, uid):
+        _log_denied(task, uid, "finish")
+        await callback.answer(Messages.NO_ACCESS, show_alert=True)
+        return
+
+    await task.update(
+        Set(
+            {
+                Task.status: TaskStatus.DONE,
+                Task.completed_at: datetime.now(timezone.utc),
+            }
+        )
+    )
+    logger.info(f"Recurring task {task.id} finished by {uid}")
+    await callback.answer(Messages.TASK_REPEAT_FINISHED)
     await safe_edit_reply_markup(callback.message)
 
 

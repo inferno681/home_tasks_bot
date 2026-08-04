@@ -19,6 +19,7 @@ from bot.constants import (
     CB_DUE_PREFIX,
     CB_EDIT_CANCEL,
     CB_EDIT_FIELD_PREFIX,
+    CB_HISTORY_PAGE_PREFIX,
     CB_POOL_INVITE_ACCEPT_PREFIX,
     CB_POOL_INVITE_DECLINE_PREFIX,
     CB_REPEAT_DAYS,
@@ -31,6 +32,7 @@ from bot.constants import (
     CB_TASK_DELETE_PREFIX,
     CB_TASK_DONE_PREFIX,
     CB_TASK_EDIT_PREFIX,
+    CB_TASK_FINISH_PREFIX,
     CB_TASK_POOL_PREFIX,
     CB_WEEKDAY_DONE,
     CB_WEEKDAY_PREFIX,
@@ -47,6 +49,8 @@ from bot.constants import (
     EDIT_FIELD_REPEAT_LABEL,
     EDIT_FIELD_TEXT,
     EDIT_FIELD_TEXT_LABEL,
+    HISTORY_NEXT_LABEL,
+    HISTORY_PREV_LABEL,
     MAIN_MENU_LABELS,
     POOL_NONE,
     POOL_PERSONAL_LABEL,
@@ -58,6 +62,7 @@ from bot.constants import (
     TASK_DELETE_BUTTON,
     TASK_DONE_BUTTON,
     TASK_EDIT_BUTTON,
+    TASK_FINISH_BUTTON,
     WEEKDAY_DONE_LABEL,
     WEEKDAY_NAMES,
 )
@@ -74,7 +79,9 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     return builder.as_markup(resize_keyboard=True)
 
 
-def task_actions_kb(task_id: str) -> InlineKeyboardMarkup:
+def task_actions_kb(
+    task_id: str, is_recurring: bool = False
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text=TASK_DONE_BUTTON, callback_data=f"{CB_TASK_DONE_PREFIX}{task_id}"
@@ -82,11 +89,16 @@ def task_actions_kb(task_id: str) -> InlineKeyboardMarkup:
     builder.button(
         text=TASK_EDIT_BUTTON, callback_data=f"{CB_TASK_EDIT_PREFIX}{task_id}"
     )
+    if is_recurring:
+        builder.button(
+            text=TASK_FINISH_BUTTON,
+            callback_data=f"{CB_TASK_FINISH_PREFIX}{task_id}",
+        )
     builder.button(
         text=TASK_DELETE_BUTTON,
         callback_data=f"{CB_TASK_DELETE_PREFIX}{task_id}",
     )
-    builder.adjust(2, 1)
+    builder.adjust(2, 2 if is_recurring else 1)
     return builder.as_markup()
 
 
@@ -224,6 +236,26 @@ def settings_kb(
     )
     builder.button(text=toggle_label, callback_data=CB_SETTINGS_ASK_TOGGLE)
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def history_nav_kb(
+    page: int, has_prev: bool, has_next: bool
+) -> Optional[InlineKeyboardMarkup]:
+    if not has_prev and not has_next:
+        return None
+    builder = InlineKeyboardBuilder()
+    if has_prev:
+        builder.button(
+            text=HISTORY_PREV_LABEL,
+            callback_data=f"{CB_HISTORY_PAGE_PREFIX}{page - 1}",
+        )
+    if has_next:
+        builder.button(
+            text=HISTORY_NEXT_LABEL,
+            callback_data=f"{CB_HISTORY_PAGE_PREFIX}{page + 1}",
+        )
+    builder.adjust(2)
     return builder.as_markup()
 
 

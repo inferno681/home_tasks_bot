@@ -7,6 +7,7 @@ OFFSET_RE = re.compile(r"^([+-])(\d{1,2})(?::(\d{2}))?$")
 
 MENU_NEW = "📝 Новая задача"
 MENU_LIST = "📋 Список задач"
+MENU_HISTORY = "📜 История"
 MENU_SHARE = "🔗 Поделиться"
 MENU_ASSIGN = "👤 Назначить"
 MENU_POOLS = "🏠 Пулы"
@@ -17,6 +18,7 @@ MENU_CANCEL = "✖️ Отмена"
 MAIN_MENU_LABELS = (
     MENU_NEW,
     MENU_LIST,
+    MENU_HISTORY,
     MENU_SHARE,
     MENU_ASSIGN,
     MENU_POOLS,
@@ -42,6 +44,7 @@ WEEKDAY_DONE_LABEL = "Готово"
 TASK_DONE_BUTTON = "✅ Готово"
 TASK_DELETE_BUTTON = "🗑 Удалить"
 TASK_EDIT_BUTTON = "✏️ Изменить"
+TASK_FINISH_BUTTON = "⏹ Завершить повтор"
 EDIT_FIELD_TEXT_LABEL = "📝 Текст/фото"
 EDIT_FIELD_CATEGORY_LABEL = "🏷 Категория"
 EDIT_FIELD_DEADLINE_LABEL = "⏰ Срок"
@@ -53,6 +56,9 @@ DECLINE_BUTTON = "❌ Отклонить"
 POOL_PERSONAL_LABEL = "🔒 Мои (личные)"
 SETTINGS_ASK_ON_TOGGLE = "🔀 Спрашивать пул при создании"
 SETTINGS_ASK_OFF_TOGGLE = "🔕 Не спрашивать (тихий дефолт)"
+HISTORY_PREV_LABEL = "◀️"
+HISTORY_NEXT_LABEL = "▶️"
+HISTORY_PAGE_SIZE = 5
 
 # --- callback_data-токены: единственный источник правды, чтобы кнопка
 #     в bot/keyboards.py и фильтр в хендлере никогда не разъехались. ---
@@ -68,6 +74,7 @@ CB_WEEKDAY_PREFIX = "wd:"
 CB_WEEKDAY_DONE = "wd_done"
 CB_TASK_DONE_PREFIX = "done:"
 CB_TASK_DELETE_PREFIX = "delete:"
+CB_TASK_FINISH_PREFIX = "finish:"
 CB_TASK_EDIT_PREFIX = "edit:"
 CB_EDIT_FIELD_PREFIX = "editf:"
 CB_EDIT_CANCEL = "edit_cancel"
@@ -88,6 +95,7 @@ CB_ASSIGN_DECLINE_PREFIX = "assign_no:"
 CB_TASK_POOL_PREFIX = "task_pool:"
 CB_SETTINGS_DEFAULT_POOL_PREFIX = "set_pool:"
 CB_SETTINGS_ASK_TOGGLE = "set_ask_toggle"
+CB_HISTORY_PAGE_PREFIX = "hist:"
 
 # --- /start deep-link payloads: Telegram допускает только [A-Za-z0-9_-],
 #     поэтому здесь подчёркивания, а не двоеточия как в callback_data выше.

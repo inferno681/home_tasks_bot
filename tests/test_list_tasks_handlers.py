@@ -16,6 +16,7 @@ from bot.handlers.list_tasks import (
     cb_assign_decline,
     cb_delete,
     cb_done,
+    cb_finish_recurring,
     cb_share_accept,
     cb_share_decline,
     cmd_assign,
@@ -417,6 +418,7 @@ async def test_done_marks_status_for_one_off_task(mongo_db):
 
     refreshed = await Task.get(task.id)
     assert refreshed.status == TaskStatus.DONE
+    assert refreshed.completed_at is not None
     callback.answer.assert_awaited_once_with(Messages.TASK_DONE)
 
 
@@ -477,3 +479,63 @@ async def test_delete_denies_non_authorized_user(mongo_db):
         Messages.NO_ACCESS, show_alert=True
     )
     assert await Task.get(task.id) is not None
+
+
+async def test_list_shows_finish_button_for_recurring_task(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    await Task(
+        user_id=1, text="t", due_at=due, repeat_every_days=7
+    ).insert()
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    kb = message.answer.await_args.kwargs["reply_markup"]
+    buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert any(b.startswith("finish:") for b in buttons)
+
+
+async def test_list_hides_finish_button_for_one_off_task(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    await Task(user_id=1, text="t").insert()
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    kb = message.answer.await_args.kwargs["reply_markup"]
+    buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert not any(b.startswith("finish:") for b in buttons)
+
+
+async def test_finish_recurring_marks_status_done(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(
+        user_id=1, text="t", due_at=due, repeat_every_days=7
+    ).insert()
+    callback = _callback(1, f"finish:{task.id}")
+
+    await cb_finish_recurring(callback)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.status == TaskStatus.DONE
+    assert refreshed.due_at == due.replace(tzinfo=None)
+    assert refreshed.completed_at is not None
+    callback.answer.assert_awaited_once_with(Messages.TASK_REPEAT_FINISHED)
+
+
+async def test_finish_recurring_denies_non_authorized_user(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(
+        user_id=1, text="t", due_at=due, repeat_every_days=7
+    ).insert()
+    callback = _callback(2, f"finish:{task.id}")
+
+    await cb_finish_recurring(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+    assert (await Task.get(task.id)).status == TaskStatus.PENDING

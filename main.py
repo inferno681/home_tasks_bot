@@ -15,6 +15,7 @@ from bot.fsm_storage import build_fsm_storage
 from bot.handlers import (
     common,
     edit_task,
+    history,
     list_tasks,
     new_task,
     pools,
@@ -36,6 +37,7 @@ def setup_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.include_router(common.router)
     dp.include_router(new_task.router)
     dp.include_router(list_tasks.router)
+    dp.include_router(history.router)
     dp.include_router(edit_task.router)
     dp.include_router(pools.router)
     dp.include_router(settings.router)
