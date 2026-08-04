@@ -2,7 +2,24 @@ from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.exceptions import TelegramForbiddenError
 
-from bot.safe_edit import safe_notify
+from bot.safe_edit import (
+    safe_delete,
+    safe_edit_reply_markup,
+    safe_edit_text,
+    safe_notify,
+)
+
+
+async def test_safe_edit_text_ignores_inaccessible_message():
+    await safe_edit_text(None, "hi")  # must not raise
+
+
+async def test_safe_edit_reply_markup_ignores_inaccessible_message():
+    await safe_edit_reply_markup(None)  # must not raise
+
+
+async def test_safe_delete_ignores_inaccessible_message():
+    await safe_delete(None)  # must not raise
 
 
 async def test_safe_notify_sends_message():

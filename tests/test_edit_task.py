@@ -14,20 +14,27 @@ from bot.handlers.edit_task import (
     cb_edit_cancel,
     cb_edit_field_picked,
     cb_edit_start,
+    edit_category_custom_prompt,
     edit_category_custom_set,
     edit_category_picked,
     edit_category_skipped,
     edit_deadline_back,
+    edit_deadline_invalid,
     edit_deadline_none,
     edit_deadline_shortcut,
     edit_deadline_text,
     edit_pool_picked,
+    edit_repeat_back,
+    edit_repeat_days_prompt,
     edit_repeat_days_set,
     edit_repeat_none,
     edit_repeat_weekday_toggle,
     edit_repeat_weekdays_confirm,
+    edit_repeat_weekdays_prompt,
+    edit_text_invalid,
     edit_text_photo,
     edit_text_text,
+    edit_weekdays_back,
 )
 from bot.models import Pool, Task, User
 
@@ -415,3 +422,266 @@ async def test_edit_denied_if_task_deleted_mid_flow(mongo_db):
     await edit_text_text(_message(uid=1, text="too late"), state)
 
     assert await state.get_state() is None
+
+
+async def test_edit_callback_denied_if_task_deleted_mid_flow(mongo_db):
+    task = await Task(user_id=1, text="chore", category="old").insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_category)
+    await state.update_data(edit_task_id=str(task.id))
+    await task.delete()
+
+    await edit_category_skipped(_callback(1, "cat_skip"), state)
+
+    assert await state.get_state() is None
+
+
+async def test_field_menu_denies_when_edit_task_id_missing(mongo_db):
+    """Covers _own_task's early-return when FSM data has no edit_task_id at
+    all (not just a stale/deleted one)."""
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_field)
+    callback = _callback(1, "editf:text")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() is None
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+
+
+async def test_field_menu_routes_to_category_step(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = await _editing(task.id)
+    callback = _callback(1, "editf:category")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_category
+
+
+async def test_field_menu_routes_to_deadline_step(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = await _editing(task.id)
+    callback = _callback(1, "editf:deadline")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_deadline
+
+
+async def test_field_menu_routes_to_repeat_step(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = await _editing(task.id)
+    callback = _callback(1, "editf:repeat")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_repeat
+
+
+async def test_field_menu_routes_to_pool_step_for_owner(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = await _editing(task.id)
+    callback = _callback(1, "editf:pool")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_pool
+
+
+async def test_edit_text_invalid_content_fallback(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_text)
+    await state.update_data(edit_task_id=str(task.id))
+
+    await edit_text_invalid(_message(uid=1))
+
+    assert (await Task.get(task.id)).text == "chore"
+
+
+async def test_edit_category_custom_prompt(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = await _editing(task.id)
+    await state.set_state(EditTask.waiting_category)
+    callback = _callback(1, "cat_custom")
+
+    await edit_category_custom_prompt(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_category_custom
+
+
+async def test_edit_category_custom_prompt_denies_stranger(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(2)
+    await state.set_state(EditTask.waiting_category)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(2, "cat_custom")
+
+    await edit_category_custom_prompt(callback, state)
+
+    assert await state.get_state() is None
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+
+
+async def test_edit_deadline_text_none(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(
+        user_id=1, text="chore", due_at=due, repeat_every_days=7
+    ).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_deadline)
+    await state.update_data(edit_task_id=str(task.id))
+
+    await edit_deadline_text(_message(uid=1, text="нет"), state)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.due_at is None
+    assert refreshed.repeat_every_days is None
+
+
+async def test_edit_deadline_text_invalid_format(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_deadline)
+    await state.update_data(edit_task_id=str(task.id))
+
+    await edit_deadline_text(_message(uid=1, text="not a date"), state)
+
+    assert (await Task.get(task.id)).due_at is None
+    assert await state.get_state() == EditTask.waiting_deadline
+
+
+async def test_edit_deadline_invalid_fallback(mongo_db):
+    await edit_deadline_invalid(_message(uid=1))
+
+
+async def test_edit_repeat_days_prompt(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, "repeat_days")
+
+    await edit_repeat_days_prompt(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_repeat_days
+
+
+async def test_edit_repeat_days_prompt_denies_stranger(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(2)
+    await state.set_state(EditTask.waiting_repeat)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(2, "repeat_days")
+
+    await edit_repeat_days_prompt(callback, state)
+
+    assert await state.get_state() is None
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+
+
+async def test_edit_repeat_back(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, "nav_back")
+
+    await edit_repeat_back(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_field
+
+
+async def test_edit_repeat_days_set_invalid_number(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat_days)
+    await state.update_data(edit_task_id=str(task.id))
+
+    await edit_repeat_days_set(_message(uid=1, text="not-a-number"), state)
+
+    assert (await Task.get(task.id)).repeat_every_days is None
+    assert await state.get_state() == EditTask.waiting_repeat_days
+
+
+async def test_edit_repeat_weekdays_prompt(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, "repeat_weekdays")
+
+    await edit_repeat_weekdays_prompt(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_repeat_weekdays
+
+
+async def test_edit_repeat_weekdays_prompt_denies_stranger(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(2)
+    await state.set_state(EditTask.waiting_repeat)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(2, "repeat_weekdays")
+
+    await edit_repeat_weekdays_prompt(callback, state)
+
+    assert await state.get_state() is None
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+
+
+async def test_edit_repeat_weekdays_confirm_requires_selection(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat_weekdays)
+    await state.update_data(edit_task_id=str(task.id), selected_weekdays=[])
+    callback = _callback(1, "wd_done")
+
+    await edit_repeat_weekdays_confirm(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_repeat_weekdays
+    callback.answer.assert_awaited_once_with(
+        Messages.PICK_AT_LEAST_ONE_DAY, show_alert=True
+    )
+
+
+async def test_edit_weekdays_back(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat_weekdays)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, "nav_back")
+
+    await edit_weekdays_back(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_repeat
+
+
+async def test_edit_weekdays_back_denies_stranger(mongo_db):
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(2)
+    await state.set_state(EditTask.waiting_repeat_weekdays)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(2, "nav_back")
+
+    await edit_weekdays_back(callback, state)
+
+    assert await state.get_state() is None
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )

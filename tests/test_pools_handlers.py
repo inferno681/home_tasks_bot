@@ -361,6 +361,25 @@ async def test_leave_keeps_unrelated_default_pool(mongo_db):
     assert user.default_pool_id == other_pool.id
 
 
+async def test_kick_requires_format(mongo_db):
+    message = _message(1)
+
+    await cmd_kick(message, CommandObject(command="kick", args=""))
+
+    message.answer.assert_awaited_once_with(Messages.KICK_FORMAT)
+
+
+async def test_kick_rejects_unknown_pool(mongo_db):
+    await User(user_id=2, username="bob").insert()
+    message = _message(1)
+
+    await cmd_kick(
+        message, CommandObject(command="kick", args="NoSuchPool @bob")
+    )
+
+    message.answer.assert_awaited_once_with(Messages.POOL_NOT_FOUND)
+
+
 async def test_kick_requires_creator(mongo_db):
     await Pool(name="Семья", members=[1, 2], created_by=1).insert()
     await User(user_id=2, username="bob").insert()

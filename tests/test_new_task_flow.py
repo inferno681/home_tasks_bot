@@ -7,22 +7,32 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, Message
 
+from bot.enums import Messages
 from bot.handlers.new_task import (
     NewTask,
+    category_custom_prompt,
     category_custom_set,
+    category_picked,
     category_skipped,
     cmd_cancel,
+    cmd_new,
+    deadline_back,
     deadline_none,
     deadline_shortcut,
+    new_task_content_invalid,
     new_task_deadline,
+    new_task_deadline_invalid,
     new_task_photo,
     new_task_text,
     pool_picked,
+    repeat_back,
+    repeat_days_prompt,
     repeat_days_set,
     repeat_none,
     repeat_weekday_toggle,
     repeat_weekdays_confirm,
     repeat_weekdays_prompt,
+    weekdays_back,
 )
 from bot.models import Pool, Task, User
 
@@ -55,7 +65,33 @@ def _callback(uid, data):
     callback.message.edit_text = AsyncMock()
     callback.message.edit_reply_markup = AsyncMock()
     callback.message.answer = AsyncMock()
+    callback.message.delete = AsyncMock()
     return callback
+
+
+async def test_cmd_new_asks_timezone_for_new_user(mongo_db):
+    state = _fsm(7)
+    message = _message(uid=7)
+
+    await cmd_new(message, state)
+
+    message.answer.assert_awaited_once_with(Messages.ASK_TIMEZONE)
+    assert await state.get_state() != NewTask.waiting_content
+
+
+async def test_cmd_new_prompts_known_user(mongo_db):
+    await User(user_id=7, utc_offset_minutes=0).insert()
+    state = _fsm(7)
+    message = _message(uid=7)
+
+    await cmd_new(message, state)
+
+    message.answer.assert_awaited_once_with(Messages.NEW_TASK_PROMPT)
+    assert await state.get_state() == NewTask.waiting_content
+
+
+async def test_new_task_content_invalid_fallback(mongo_db):
+    await new_task_content_invalid(_message(uid=1))
 
 
 async def test_full_flow_shortcut_deadline_no_repeat(mongo_db):
@@ -130,6 +166,112 @@ async def test_repeat_days_creates_task(mongo_db):
     assert await state.get_state() is None
     task = await Task.find_one(Task.user_id == 3)
     assert task.repeat_every_days == 3
+
+
+async def test_category_picked_from_top(mongo_db):
+    state = _fsm(1)
+    await state.update_data(text="chore")
+    await state.set_state(NewTask.waiting_category)
+
+    await category_picked(_callback(1, "cat:kitchen"), state)
+
+    assert await state.get_state() == NewTask.waiting_deadline
+    assert (await state.get_data())["category"] == "kitchen"
+
+
+async def test_category_custom_prompt(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_category)
+
+    await category_custom_prompt(_callback(1, "cat_custom"), state)
+
+    assert await state.get_state() == NewTask.waiting_category_custom
+
+
+async def test_deadline_back_returns_to_category(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_deadline)
+
+    await deadline_back(_callback(1, "nav_back"), state)
+
+    assert await state.get_state() == NewTask.waiting_category
+
+
+async def test_new_task_deadline_none_via_text(mongo_db):
+    state = _fsm(1)
+    await state.update_data(text="chore")
+    await state.set_state(NewTask.waiting_deadline)
+
+    await new_task_deadline(_message(uid=1, text="нет"), state)
+
+    task = await Task.find_one(Task.user_id == 1)
+    assert task.due_at is None
+    assert await state.get_state() is None
+
+
+async def test_new_task_deadline_invalid_format(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_deadline)
+
+    await new_task_deadline(_message(uid=1, text="not a date"), state)
+
+    assert await state.get_state() == NewTask.waiting_deadline
+
+
+async def test_new_task_deadline_invalid_fallback(mongo_db):
+    await new_task_deadline_invalid(_message(uid=1))
+
+
+async def test_repeat_days_prompt(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_repeat)
+
+    await repeat_days_prompt(_callback(1, "repeat_days"), state)
+
+    assert await state.get_state() == NewTask.waiting_repeat_days
+
+
+async def test_repeat_back_returns_to_deadline(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_repeat)
+
+    await repeat_back(_callback(1, "nav_back"), state)
+
+    assert await state.get_state() == NewTask.waiting_deadline
+
+
+async def test_repeat_days_set_invalid_number(mongo_db):
+    state = _fsm(1)
+    await state.update_data(text="chore")
+    await state.set_state(NewTask.waiting_repeat_days)
+
+    await repeat_days_set(_message(uid=1, text="not-a-number"), state)
+
+    assert await state.get_state() == NewTask.waiting_repeat_days
+    assert await Task.find_one(Task.user_id == 1) is None
+
+
+async def test_repeat_weekdays_confirm_requires_selection(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_repeat_weekdays)
+    await state.update_data(selected_weekdays=[])
+    callback = _callback(1, "wd_done")
+
+    await repeat_weekdays_confirm(callback, state)
+
+    assert await state.get_state() == NewTask.waiting_repeat_weekdays
+    callback.answer.assert_awaited_once_with(
+        Messages.PICK_AT_LEAST_ONE_DAY, show_alert=True
+    )
+
+
+async def test_weekdays_back_returns_to_repeat(mongo_db):
+    state = _fsm(1)
+    await state.set_state(NewTask.waiting_repeat_weekdays)
+
+    await weekdays_back(_callback(1, "nav_back"), state)
+
+    assert await state.get_state() == NewTask.waiting_repeat
 
 
 async def test_ask_pool_on_create_inserts_pool_step(mongo_db):

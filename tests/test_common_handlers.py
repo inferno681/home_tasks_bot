@@ -90,6 +90,20 @@ async def test_start_with_payload_defers_until_timezone_is_set(mongo_db):
     assert "wash the car" in confirm_text
 
 
+async def test_start_with_unresolvable_payload_shows_only_welcome(mongo_db):
+    """A malformed/expired deep-link payload must not crash cmd_start — it
+    just silently skips the confirm card."""
+    await User(user_id=1, utc_offset_minutes=180).insert()
+    state = _fsm()
+    message = _message(uid=1)
+
+    await cmd_start(
+        message, state, CommandObject(command="start", args="bogus")
+    )
+
+    message.answer.assert_awaited_once()
+
+
 async def test_set_timezone_rejects_invalid_offset(mongo_db):
     state = _fsm()
     await state.set_state(SetTimezone.waiting_offset)

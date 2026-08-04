@@ -9,7 +9,7 @@ from beanie.operators import AddToSet, Set
 from bot.enums import TaskStatus
 from bot.handlers.list_tasks import _open_tasks_for
 from bot.models import Task
-from bot.scheduler import check_reminders
+from bot.scheduler import check_reminders, setup_scheduler
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -82,6 +82,31 @@ async def test_check_reminders_keeps_reminded_false_on_send_failure(mongo_db):
     await check_reminders(fake_bot)
 
     assert (await Task.get(task.id)).reminded is False
+
+
+async def test_check_reminders_sends_photo_when_task_has_one(mongo_db):
+    await Task(
+        user_id=1,
+        text="water plants",
+        photo_file_id="photo123",
+        due_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    ).insert()
+
+    fake_bot = AsyncMock()
+    await check_reminders(fake_bot)
+
+    fake_bot.send_photo.assert_awaited_once()
+    assert fake_bot.send_photo.await_args.args[0] == 1
+    assert fake_bot.send_photo.await_args.args[1] == "photo123"
+    fake_bot.send_message.assert_not_awaited()
+
+
+def test_setup_scheduler_registers_check_reminders_job():
+    scheduler = setup_scheduler(AsyncMock())
+
+    jobs = scheduler.get_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].func is check_reminders
 
 
 async def test_atomic_updates_survive_concurrent_stale_reads(mongo_db):

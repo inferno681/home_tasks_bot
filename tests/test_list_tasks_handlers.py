@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import CommandObject
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, Message
 
 from bot.enums import Messages, TaskStatus
@@ -16,17 +19,26 @@ from bot.handlers.list_tasks import (
     cb_share_accept,
     cb_share_decline,
     cmd_assign,
+    cmd_list,
     cmd_share,
 )
-from bot.models import Task, User
+from bot.models import Pool, Task, User
 
 pytestmark = pytest.mark.usefixtures("clean_db")
+
+
+def _fsm(user_id=1):
+    return FSMContext(
+        storage=MemoryStorage(),
+        key=StorageKey(bot_id=1, chat_id=user_id, user_id=user_id),
+    )
 
 
 def _message(uid=1):
     message = MagicMock(spec=Message)
     message.from_user = SimpleNamespace(id=uid)
     message.answer = AsyncMock()
+    message.answer_photo = AsyncMock()
     message.bot = MagicMock()
     message.bot.send_message = AsyncMock()
     message.bot.get_me = AsyncMock(
@@ -49,6 +61,71 @@ def _callback(uid, data):
     return callback
 
 
+async def test_list_asks_timezone_for_new_user(mongo_db):
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    message.answer.assert_awaited_once_with(Messages.ASK_TIMEZONE)
+
+
+async def test_list_shows_no_open_tasks_message(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    message.answer.assert_awaited_once_with(Messages.NO_OPEN_TASKS)
+
+
+async def test_list_shows_full_task_card_without_photo(mongo_db):
+    """Exercises _caption's every optional line at once: category, pool,
+    due date, assignee, both repeat kinds, completed history."""
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    await User(user_id=2, username="bob").insert()
+    pool = await Pool(name="Семья", members=[1], created_by=1).insert()
+    due = datetime(2030, 1, 1, 10, 0, tzinfo=timezone.utc)
+    completed = datetime(2029, 1, 1, 10, 0, tzinfo=timezone.utc)
+    await Task(
+        user_id=1,
+        text="water plants",
+        category="garden",
+        pool_id=pool.id,
+        due_at=due,
+        assigned_to=2,
+        repeat_every_days=3,
+        repeat_weekdays=[0, 2],
+        completed_history=[completed],
+    ).insert()
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    message.answer.assert_awaited_once()
+    caption = message.answer.await_args.args[0]
+    assert "garden" in caption
+    assert "Семья" in caption
+    assert "@bob" in caption
+
+
+async def test_list_shows_task_with_photo(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    await Task(
+        user_id=1, text="chore", photo_file_id="photo123"
+    ).insert()
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    message.answer_photo.assert_awaited_once()
+    assert message.answer_photo.await_args.args[0] == "photo123"
+    message.answer.assert_not_awaited()
+
+
 async def test_share_requires_ownership(mongo_db):
     task = await Task(user_id=1, text="t").insert()
     await User(user_id=2, username="bob").insert()
@@ -60,6 +137,39 @@ async def test_share_requires_ownership(mongo_db):
 
     message.answer.assert_awaited_once_with(Messages.SHARE_OWNER_ONLY)
     assert (await Task.get(task.id)).shared_with == []
+
+
+async def test_share_requires_format(mongo_db):
+    message = _message(uid=1)
+
+    await cmd_share(message, CommandObject(command="share", args=""))
+
+    message.answer.assert_awaited_once_with(Messages.SHARE_FORMAT)
+
+
+async def test_share_rejects_unknown_task(mongo_db):
+    message = _message(uid=1)
+
+    await cmd_share(
+        message,
+        CommandObject(
+            command="share", args="000000000000000000000000 @bob"
+        ),
+    )
+
+    message.answer.assert_awaited_once_with(Messages.TASK_NOT_FOUND)
+
+
+async def test_share_already_shared(mongo_db):
+    task = await Task(user_id=1, text="t", shared_with=[2]).insert()
+    await User(user_id=2, username="bob").insert()
+    message = _message(uid=1)
+
+    await cmd_share(
+        message, CommandObject(command="share", args=f"{task.id} @bob")
+    )
+
+    message.answer.assert_awaited_once_with(Messages.ALREADY_SHARED)
 
 
 async def test_share_sends_confirm_request(mongo_db):
@@ -162,6 +272,63 @@ async def test_share_accept_tolerates_unreachable_requester(mongo_db):
     await cb_share_accept(callback)
 
     assert (await Task.get(task.id)).shared_with == [2]
+
+
+async def test_assign_requires_format(mongo_db):
+    message = _message(uid=1)
+
+    await cmd_assign(message, CommandObject(command="assign", args=""))
+
+    message.answer.assert_awaited_once_with(Messages.ASSIGN_FORMAT)
+
+
+async def test_assign_rejects_unknown_task(mongo_db):
+    message = _message(uid=1)
+
+    await cmd_assign(
+        message,
+        CommandObject(
+            command="assign", args="000000000000000000000000 @bob"
+        ),
+    )
+
+    message.answer.assert_awaited_once_with(Messages.TASK_NOT_FOUND)
+
+
+async def test_assign_requires_ownership(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    await User(user_id=2, username="bob").insert()
+    message = _message(uid=2)
+
+    await cmd_assign(
+        message, CommandObject(command="assign", args=f"{task.id} @bob")
+    )
+
+    message.answer.assert_awaited_once_with(Messages.ASSIGN_OWNER_ONLY)
+
+
+async def test_assign_unregistered_user_gets_deep_link(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    message = _message(uid=1)
+
+    await cmd_assign(
+        message, CommandObject(command="assign", args=f"{task.id} @ghost")
+    )
+
+    text = message.answer.await_args.args[0]
+    assert f"https://t.me/testbot?start=assign_{task.id}_1" in text
+
+
+async def test_assign_already_assigned(mongo_db):
+    task = await Task(user_id=1, text="t", assigned_to=2).insert()
+    await User(user_id=2, username="bob").insert()
+    message = _message(uid=1)
+
+    await cmd_assign(
+        message, CommandObject(command="assign", args=f"{task.id} @bob")
+    )
+
+    message.answer.assert_awaited_once_with(Messages.ASSIGN_ALREADY)
 
 
 async def test_assign_sends_confirm_request(mongo_db):
@@ -298,3 +465,15 @@ async def test_delete_removes_task(mongo_db):
 
     assert await Task.get(task.id) is None
     callback.message.delete.assert_awaited_once()
+
+
+async def test_delete_denies_non_authorized_user(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    callback = _callback(2, f"delete:{task.id}")
+
+    await cb_delete(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+    assert await Task.get(task.id) is not None
