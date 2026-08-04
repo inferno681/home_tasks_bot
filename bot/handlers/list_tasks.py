@@ -6,11 +6,8 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from beanie import PydanticObjectId
 from beanie.operators import AddToSet, And, In, Or, Set
-from bson.errors import InvalidId
 
-from bot.authz import is_authorized
 from bot.constants import (
     CB_ASSIGN_ACCEPT_PREFIX,
     CB_ASSIGN_DECLINE_PREFIX,
@@ -38,6 +35,7 @@ from bot.safe_edit import (
     safe_edit_text,
     safe_notify,
 )
+from bot.task_access import get_task, is_task_authorized
 from bot.timeutils import to_local, user_offset
 
 logger = logging.getLogger(__name__)
@@ -61,24 +59,6 @@ async def _open_tasks_for(
     if category:
         conditions.append(Task.category == category)
     return await Task.find(*conditions).sort("+due_at").to_list()
-
-
-async def _get_task(task_id: str) -> Optional[Task]:
-    try:
-        object_id = PydanticObjectId(task_id)
-    except InvalidId:
-        return None
-    return await Task.get(object_id)
-
-
-async def _authorized(task: Task, uid: int) -> bool:
-    is_pool_member = False
-    if task.pool_id:
-        pool = await Pool.get(task.pool_id)
-        is_pool_member = bool(pool and uid in pool.members)
-    return is_authorized(
-        task.user_id, task.shared_with, uid, is_pool_member
-    )
 
 
 async def _caption(task: Task, offset: int) -> str:
@@ -162,7 +142,7 @@ async def cmd_share(
     username = args[1].lstrip("@").lower()
     uid = message.from_user.id
 
-    task = await _get_task(task_id)
+    task = await get_task(task_id)
     if not task:
         await message.answer(Messages.TASK_NOT_FOUND)
         return
@@ -206,7 +186,7 @@ async def cmd_assign(
     username = args[1].lstrip("@").lower()
     uid = message.from_user.id
 
-    task = await _get_task(task_id)
+    task = await get_task(task_id)
     if not task:
         await message.answer(Messages.TASK_NOT_FOUND)
         return
@@ -245,7 +225,7 @@ def _log_denied(task: Optional[Task], uid: int, action: str) -> None:
 @router.callback_query(F.data.startswith(CB_SHARE_ACCEPT_PREFIX))
 async def cb_share_accept(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
-    task = await _get_task(task_id_raw)
+    task = await get_task(task_id_raw)
     requester_id = int(requester_id_raw)
     accepter_id = callback.from_user.id
     # requester_id приходит из callback_data, которую в обход /share можно
@@ -272,7 +252,7 @@ async def cb_share_accept(callback: CallbackQuery):
 @router.callback_query(F.data.startswith(CB_SHARE_DECLINE_PREFIX))
 async def cb_share_decline(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
-    task = await _get_task(task_id_raw)
+    task = await get_task(task_id_raw)
     requester_id = int(requester_id_raw)
     decliner_id = callback.from_user.id
 
@@ -293,7 +273,7 @@ async def cb_share_decline(callback: CallbackQuery):
 @router.callback_query(F.data.startswith(CB_ASSIGN_ACCEPT_PREFIX))
 async def cb_assign_accept(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
-    task = await _get_task(task_id_raw)
+    task = await get_task(task_id_raw)
     requester_id = int(requester_id_raw)
     accepter_id = callback.from_user.id
     if not task or task.user_id != requester_id:
@@ -320,7 +300,7 @@ async def cb_assign_accept(callback: CallbackQuery):
 @router.callback_query(F.data.startswith(CB_ASSIGN_DECLINE_PREFIX))
 async def cb_assign_decline(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
-    task = await _get_task(task_id_raw)
+    task = await get_task(task_id_raw)
     requester_id = int(requester_id_raw)
     decliner_id = callback.from_user.id
 
@@ -341,9 +321,9 @@ async def cb_assign_decline(callback: CallbackQuery):
 @router.callback_query(F.data.startswith(CB_TASK_DONE_PREFIX))
 async def cb_done(callback: CallbackQuery):
     task_id = callback.data.split(":", 1)[1]
-    task = await _get_task(task_id)
+    task = await get_task(task_id)
     uid = callback.from_user.id
-    if not task or not await _authorized(task, uid):
+    if not task or not await is_task_authorized(task, uid):
         _log_denied(task, uid, "done")
         await callback.answer(Messages.NO_ACCESS, show_alert=True)
         return
@@ -370,9 +350,9 @@ async def cb_done(callback: CallbackQuery):
 @router.callback_query(F.data.startswith(CB_TASK_DELETE_PREFIX))
 async def cb_delete(callback: CallbackQuery):
     task_id = callback.data.split(":", 1)[1]
-    task = await _get_task(task_id)
+    task = await get_task(task_id)
     uid = callback.from_user.id
-    if not task or not await _authorized(task, uid):
+    if not task or not await is_task_authorized(task, uid):
         _log_denied(task, uid, "delete")
         await callback.answer(Messages.NO_ACCESS, show_alert=True)
         return

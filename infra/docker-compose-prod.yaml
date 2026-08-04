@@ -12,6 +12,8 @@ services:
       - ./config.yaml:/app/config/config.yaml
     env_file:
       - .env
-    # порт нужен, только если в config.yaml включён service.webhook
+    # порт нужен, только если в config.yaml включён service.webhook;
+    # биндим на loopback — снаружи должен быть виден только nginx (443),
+    # сам бот доступен только ему через 127.0.0.1 (см. infra/nginx.conf.template)
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"

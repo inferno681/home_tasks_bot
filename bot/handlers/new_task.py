@@ -31,6 +31,7 @@ from bot.constants import (
     POOL_NONE,
     WEEKDAY_NAMES,
 )
+from bot.display import pool_label
 from bot.enums import Messages
 from bot.handlers.common import ensure_timezone
 from bot.keyboards import (
@@ -114,13 +115,6 @@ async def _after_content(message: Message, state: FSMContext) -> None:
     await ask_category(message, state)
 
 
-async def _pool_label(pool_id) -> str:
-    if not pool_id:
-        return Messages.POOL_PERSONAL_NAME
-    pool = await Pool.get(pool_id)
-    return pool.name if pool else Messages.POOL_PERSONAL_NAME
-
-
 @router.callback_query(
     NewTask.waiting_pool, F.data.startswith(CB_TASK_POOL_PREFIX)
 )
@@ -129,7 +123,7 @@ async def pool_picked(callback: CallbackQuery, state: FSMContext):
     pool_id = None if raw == POOL_NONE else PydanticObjectId(raw)
     await state.update_data(pool_id=pool_id)
     await callback.answer()
-    label = await _pool_label(pool_id)
+    label = await pool_label(pool_id)
     await safe_edit_text(
         callback.message, Messages.TASK_POOL_LABEL.format(pool=label)
     )

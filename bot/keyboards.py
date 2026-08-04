@@ -17,6 +17,8 @@ from bot.constants import (
     CB_CATEGORY_SKIP,
     CB_DUE_NONE,
     CB_DUE_PREFIX,
+    CB_EDIT_CANCEL,
+    CB_EDIT_FIELD_PREFIX,
     CB_POOL_INVITE_ACCEPT_PREFIX,
     CB_POOL_INVITE_DECLINE_PREFIX,
     CB_REPEAT_DAYS,
@@ -28,11 +30,23 @@ from bot.constants import (
     CB_SHARE_DECLINE_PREFIX,
     CB_TASK_DELETE_PREFIX,
     CB_TASK_DONE_PREFIX,
+    CB_TASK_EDIT_PREFIX,
     CB_TASK_POOL_PREFIX,
     CB_WEEKDAY_DONE,
     CB_WEEKDAY_PREFIX,
     DEADLINE_BUTTON_LABELS,
     DECLINE_BUTTON,
+    EDIT_CANCEL_LABEL,
+    EDIT_FIELD_CATEGORY,
+    EDIT_FIELD_CATEGORY_LABEL,
+    EDIT_FIELD_DEADLINE,
+    EDIT_FIELD_DEADLINE_LABEL,
+    EDIT_FIELD_POOL,
+    EDIT_FIELD_POOL_LABEL,
+    EDIT_FIELD_REPEAT,
+    EDIT_FIELD_REPEAT_LABEL,
+    EDIT_FIELD_TEXT,
+    EDIT_FIELD_TEXT_LABEL,
     MAIN_MENU_LABELS,
     POOL_NONE,
     POOL_PERSONAL_LABEL,
@@ -43,6 +57,7 @@ from bot.constants import (
     SETTINGS_ASK_ON_TOGGLE,
     TASK_DELETE_BUTTON,
     TASK_DONE_BUTTON,
+    TASK_EDIT_BUTTON,
     WEEKDAY_DONE_LABEL,
     WEEKDAY_NAMES,
 )
@@ -65,10 +80,40 @@ def task_actions_kb(task_id: str) -> InlineKeyboardMarkup:
         text=TASK_DONE_BUTTON, callback_data=f"{CB_TASK_DONE_PREFIX}{task_id}"
     )
     builder.button(
+        text=TASK_EDIT_BUTTON, callback_data=f"{CB_TASK_EDIT_PREFIX}{task_id}"
+    )
+    builder.button(
         text=TASK_DELETE_BUTTON,
         callback_data=f"{CB_TASK_DELETE_PREFIX}{task_id}",
     )
-    builder.adjust(2)
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+def edit_menu_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=EDIT_FIELD_TEXT_LABEL,
+        callback_data=f"{CB_EDIT_FIELD_PREFIX}{EDIT_FIELD_TEXT}",
+    )
+    builder.button(
+        text=EDIT_FIELD_CATEGORY_LABEL,
+        callback_data=f"{CB_EDIT_FIELD_PREFIX}{EDIT_FIELD_CATEGORY}",
+    )
+    builder.button(
+        text=EDIT_FIELD_DEADLINE_LABEL,
+        callback_data=f"{CB_EDIT_FIELD_PREFIX}{EDIT_FIELD_DEADLINE}",
+    )
+    builder.button(
+        text=EDIT_FIELD_REPEAT_LABEL,
+        callback_data=f"{CB_EDIT_FIELD_PREFIX}{EDIT_FIELD_REPEAT}",
+    )
+    builder.button(
+        text=EDIT_FIELD_POOL_LABEL,
+        callback_data=f"{CB_EDIT_FIELD_PREFIX}{EDIT_FIELD_POOL}",
+    )
+    builder.button(text=EDIT_CANCEL_LABEL, callback_data=CB_EDIT_CANCEL)
+    builder.adjust(1)
     return builder.as_markup()
 
 
