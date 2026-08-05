@@ -6,8 +6,8 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
-from beanie import PydanticObjectId
 
+from bot.callback_parse import parse_int
 from bot.categories import top_categories
 from bot.constants import (
     BACK_CALLBACK_DATA,
@@ -42,6 +42,7 @@ from bot.keyboards import (
     weekday_toggle_kb,
 )
 from bot.models import Pool, Task, User
+from bot.pool_access import get_member_pool
 from bot.safe_edit import safe_delete, safe_edit_reply_markup, safe_edit_text
 from bot.timeutils import to_local, to_utc, user_offset
 from bot.validators import is_category_too_long
@@ -120,7 +121,13 @@ async def _after_content(message: Message, state: FSMContext) -> None:
 )
 async def pool_picked(callback: CallbackQuery, state: FSMContext):
     raw = callback.data.split(":", 1)[1]
-    pool_id = None if raw == POOL_NONE else PydanticObjectId(raw)
+    pool_id = None
+    if raw != POOL_NONE:
+        pool = await get_member_pool(raw, callback.from_user.id)
+        if not pool:
+            await callback.answer(Messages.POOL_NOT_FOUND, show_alert=True)
+            return
+        pool_id = pool.id
     await state.update_data(pool_id=pool_id)
     await callback.answer()
     label = await pool_label(pool_id)
@@ -143,6 +150,9 @@ async def ask_category(message: Message, state: FSMContext) -> None:
 )
 async def category_picked(callback: CallbackQuery, state: FSMContext):
     category = callback.data.split(":", 1)[1]
+    if is_category_too_long(category):
+        await callback.answer()
+        return
     await state.update_data(category=category)
     await callback.answer()
     await safe_edit_text(
@@ -193,7 +203,10 @@ async def ask_deadline(message: Message, state: FSMContext) -> None:
 )
 async def deadline_shortcut(callback: CallbackQuery, state: FSMContext):
     key = callback.data.split(":", 1)[1]
-    delta = DEADLINE_SHORTCUTS[key]
+    delta = DEADLINE_SHORTCUTS.get(key)
+    if delta is None:
+        await callback.answer()
+        return
     await callback.answer()
     await state.update_data(due_at=datetime.now(timezone.utc) + delta)
     await safe_edit_text(
@@ -310,7 +323,10 @@ async def repeat_weekdays_prompt(callback: CallbackQuery, state: FSMContext):
     NewTask.waiting_repeat_weekdays, F.data.startswith(CB_WEEKDAY_PREFIX)
 )
 async def repeat_weekday_toggle(callback: CallbackQuery, state: FSMContext):
-    idx = int(callback.data.split(":", 1)[1])
+    idx = parse_int(callback.data.split(":", 1)[1])
+    if idx is None or not 0 <= idx < len(WEEKDAY_NAMES):
+        await callback.answer()
+        return
     data = await state.get_data()
     selected = set(data.get("selected_weekdays", []))
     selected.symmetric_difference_update({idx})

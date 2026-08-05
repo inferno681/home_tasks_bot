@@ -6,7 +6,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from beanie.operators import Set
 
 from bot.enums import Messages, TaskStatus
-from bot.models import Pool, Task
+from bot.models import Pool, Task, User
+from bot.timeutils import is_quiet_hour, to_local, user_offset
 from config.config import config
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,35 @@ async def _reminder_recipients(task: Task) -> list[int]:
     return sorted({task.user_id, *task.shared_with, *pool_members})
 
 
-async def _send_reminder(bot: Bot, task: Task, recipient: int) -> bool:
-    """Send one reminder to one recipient; returns whether it went through."""
+async def _is_quiet_for(recipient: int, now: datetime) -> bool:
+    if not config.scheduler.quiet_hours_enabled:
+        return False
+    user = await User.find_one(User.user_id == recipient)
+    offset = user_offset(user.utc_offset_minutes if user else None)
+    local_hour = to_local(now, offset).hour
+    return is_quiet_hour(
+        local_hour,
+        config.scheduler.quiet_hours_start,
+        config.scheduler.quiet_hours_end,
+    )
+
+
+async def _send_reminder(
+    bot: Bot, task: Task, recipient: int, now: datetime
+) -> bool:
+    """Send one reminder to one recipient; returns whether it went through
+    (False both for a quiet-hours skip and a real delivery failure — the
+    caller retries either case on the next tick).
+
+    ponytail: `reminded` is one flag per task, not per recipient, so if a
+    non-quiet recipient already got it this tick, a quiet-hours recipient in
+    a pool with mixed timezones just misses this reminder for good — same
+    trade-off the codebase already accepts for a blocked-bot recipient
+    below. Per-recipient delivery tracking would fix both, out of scope.
+    """
+    if await _is_quiet_for(recipient, now):
+        return False
+
     text = Messages.REMINDER.format(text=task.text or Messages.NO_TEXT)
     try:
         if task.photo_file_id:
@@ -51,6 +79,7 @@ async def check_reminders(bot: Bot):
         Task.reminded == False,  # noqa: E712
         Task.due_at != None,  # noqa: E711
         Task.due_at <= now,
+        Task.deleted_at == None,  # noqa: E711
     ).to_list()
 
     for task in tasks:
@@ -59,7 +88,7 @@ async def check_reminders(bot: Bot):
         # иначе один заблокировавший бота участник пула держит остальных
         # на бесконечном ретрае.
         delivered = [
-            await _send_reminder(bot, task, recipient)
+            await _send_reminder(bot, task, recipient, now)
             for recipient in recipients
         ]
         if any(delivered):

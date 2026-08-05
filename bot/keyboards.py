@@ -29,11 +29,15 @@ from bot.constants import (
     CB_SETTINGS_DEFAULT_POOL_PREFIX,
     CB_SHARE_ACCEPT_PREFIX,
     CB_SHARE_DECLINE_PREFIX,
+    CB_SNOOZE_APPLY_PREFIX,
+    CB_SNOOZE_CANCEL_PREFIX,
     CB_TASK_DELETE_PREFIX,
     CB_TASK_DONE_PREFIX,
     CB_TASK_EDIT_PREFIX,
     CB_TASK_FINISH_PREFIX,
     CB_TASK_POOL_PREFIX,
+    CB_TASK_SNOOZE_PREFIX,
+    CB_TASK_UNDELETE_PREFIX,
     CB_WEEKDAY_DONE,
     CB_WEEKDAY_PREFIX,
     DEADLINE_BUTTON_LABELS,
@@ -63,6 +67,8 @@ from bot.constants import (
     TASK_DONE_BUTTON,
     TASK_EDIT_BUTTON,
     TASK_FINISH_BUTTON,
+    TASK_SNOOZE_BUTTON,
+    UNDO_DELETE_BUTTON,
     WEEKDAY_DONE_LABEL,
     WEEKDAY_NAMES,
 )
@@ -80,7 +86,7 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
 
 
 def task_actions_kb(
-    task_id: str, is_recurring: bool = False
+    task_id: str, is_recurring: bool = False, has_deadline: bool = False
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -89,6 +95,11 @@ def task_actions_kb(
     builder.button(
         text=TASK_EDIT_BUTTON, callback_data=f"{CB_TASK_EDIT_PREFIX}{task_id}"
     )
+    if has_deadline:
+        builder.button(
+            text=TASK_SNOOZE_BUTTON,
+            callback_data=f"{CB_TASK_SNOOZE_PREFIX}{task_id}",
+        )
     if is_recurring:
         builder.button(
             text=TASK_FINISH_BUTTON,
@@ -98,7 +109,31 @@ def task_actions_kb(
         text=TASK_DELETE_BUTTON,
         callback_data=f"{CB_TASK_DELETE_PREFIX}{task_id}",
     )
-    builder.adjust(2, 2 if is_recurring else 1)
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def snooze_choice_kb(task_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for key, label in DEADLINE_BUTTON_LABELS.items():
+        builder.button(
+            text=label,
+            callback_data=f"{CB_SNOOZE_APPLY_PREFIX}{task_id}:{key}",
+        )
+    builder.button(
+        text=BACK_BUTTON_TEXT,
+        callback_data=f"{CB_SNOOZE_CANCEL_PREFIX}{task_id}",
+    )
+    builder.adjust(3, 2, 1)
+    return builder.as_markup()
+
+
+def undo_delete_kb(task_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=UNDO_DELETE_BUTTON,
+        callback_data=f"{CB_TASK_UNDELETE_PREFIX}{task_id}",
+    )
     return builder.as_markup()
 
 

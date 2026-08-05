@@ -14,8 +14,17 @@ os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("MONGO_URI", "mongodb://localhost/test")
 
 from bot.models import Pool, Task, User  # noqa: E402 (env vars first)
+from config.config import config  # noqa: E402 (env vars first)
 
 TEST_MONGO_URI = os.environ.get("TEST_MONGO_URI", "mongodb://localhost:27017")
+
+
+@pytest.fixture(autouse=True)
+def _quiet_hours_off(monkeypatch):
+    """Off by default so scheduler tests aren't flaky depending on the
+    wall-clock time they happen to run at; tests for the feature itself
+    opt back in explicitly."""
+    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", False)
 
 
 @pytest_asyncio.fixture(scope="session")

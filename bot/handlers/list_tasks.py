@@ -8,14 +8,21 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from beanie.operators import AddToSet, And, In, Or, Set
 
+from bot.callback_parse import parse_int
 from bot.constants import (
     CB_ASSIGN_ACCEPT_PREFIX,
     CB_ASSIGN_DECLINE_PREFIX,
     CB_SHARE_ACCEPT_PREFIX,
     CB_SHARE_DECLINE_PREFIX,
+    CB_SNOOZE_APPLY_PREFIX,
+    CB_SNOOZE_CANCEL_PREFIX,
     CB_TASK_DELETE_PREFIX,
     CB_TASK_DONE_PREFIX,
     CB_TASK_FINISH_PREFIX,
+    CB_TASK_SNOOZE_PREFIX,
+    CB_TASK_UNDELETE_PREFIX,
+    DEADLINE_CONFIRM_LABELS,
+    DEADLINE_SHORTCUTS,
     MENU_ASSIGN,
     MENU_LIST,
     MENU_SHARE,
@@ -27,16 +34,17 @@ from bot.deeplinks import notify_unregistered
 from bot.display import display_name
 from bot.enums import Messages, TaskStatus
 from bot.handlers.common import ensure_timezone
-from bot.keyboards import assign_confirm_kb, share_confirm_kb, task_actions_kb
+from bot.keyboards import (
+    assign_confirm_kb,
+    share_confirm_kb,
+    snooze_choice_kb,
+    task_actions_kb,
+    undo_delete_kb,
+)
 from bot.models import Pool, Task, User
 from bot.recurrence import next_due_date
-from bot.safe_edit import (
-    safe_delete,
-    safe_edit_reply_markup,
-    safe_edit_text,
-    safe_notify,
-)
-from bot.task_access import get_task, is_task_authorized
+from bot.safe_edit import safe_edit_reply_markup, safe_edit_text, safe_notify
+from bot.task_access import get_deleted_task, get_task, is_task_authorized
 from bot.timeutils import to_local, user_offset
 
 logger = logging.getLogger(__name__)
@@ -56,6 +64,7 @@ async def _open_tasks_for(
             Task.shared_with == uid,
         ),
         Task.status == TaskStatus.PENDING,
+        Task.deleted_at == None,  # noqa: E711
     ]
     if category:
         conditions.append(Task.category == category)
@@ -126,7 +135,9 @@ async def cmd_list(
 
     for task in tasks:
         caption = await _caption(task, offset)
-        kb = task_actions_kb(str(task.id), _is_recurring(task))
+        kb = task_actions_kb(
+            str(task.id), _is_recurring(task), bool(task.due_at)
+        )
         if task.photo_file_id:
             await message.answer_photo(
                 task.photo_file_id, caption=caption, reply_markup=kb
@@ -233,12 +244,12 @@ def _log_denied(task: Optional[Task], uid: int, action: str) -> None:
 async def cb_share_accept(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
     task = await get_task(task_id_raw)
-    requester_id = int(requester_id_raw)
+    requester_id = parse_int(requester_id_raw)
     accepter_id = callback.from_user.id
     # requester_id приходит из callback_data, которую в обход /share можно
     # получить через подделанный /start-диплинк — перепроверяем владельца
     # по текущим данным, а не доверяем чужому вводу.
-    if not task or task.user_id != requester_id:
+    if not task or requester_id is None or task.user_id != requester_id:
         await callback.answer(Messages.INVITE_EXPIRED, show_alert=True)
         return
 
@@ -260,12 +271,12 @@ async def cb_share_accept(callback: CallbackQuery):
 async def cb_share_decline(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
     task = await get_task(task_id_raw)
-    requester_id = int(requester_id_raw)
+    requester_id = parse_int(requester_id_raw)
     decliner_id = callback.from_user.id
 
     await callback.answer()
     await safe_edit_text(callback.message, Messages.SHARE_DECLINED)
-    if not task or task.user_id != requester_id:
+    if not task or requester_id is None or task.user_id != requester_id:
         return
     decliner = await User.find_one(User.user_id == decliner_id)
     await safe_notify(
@@ -281,9 +292,9 @@ async def cb_share_decline(callback: CallbackQuery):
 async def cb_assign_accept(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
     task = await get_task(task_id_raw)
-    requester_id = int(requester_id_raw)
+    requester_id = parse_int(requester_id_raw)
     accepter_id = callback.from_user.id
-    if not task or task.user_id != requester_id:
+    if not task or requester_id is None or task.user_id != requester_id:
         await callback.answer(Messages.INVITE_EXPIRED, show_alert=True)
         return
 
@@ -308,12 +319,12 @@ async def cb_assign_accept(callback: CallbackQuery):
 async def cb_assign_decline(callback: CallbackQuery):
     task_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
     task = await get_task(task_id_raw)
-    requester_id = int(requester_id_raw)
+    requester_id = parse_int(requester_id_raw)
     decliner_id = callback.from_user.id
 
     await callback.answer()
     await safe_edit_text(callback.message, Messages.ASSIGN_DECLINED)
-    if not task or task.user_id != requester_id:
+    if not task or requester_id is None or task.user_id != requester_id:
         return
     decliner = await User.find_one(User.user_id == decliner_id)
     await safe_notify(
@@ -393,7 +404,81 @@ async def cb_delete(callback: CallbackQuery):
         _log_denied(task, uid, "delete")
         await callback.answer(Messages.NO_ACCESS, show_alert=True)
         return
-    await task.delete()
-    logger.info(f"Task {task.id} deleted by {uid}")
+    now = datetime.now(timezone.utc)
+    await task.update(Set({Task.deleted_at: now}))
+    logger.info(f"Task {task.id} soft-deleted by {uid}")
     await callback.answer(Messages.TASK_DELETED)
-    await safe_delete(callback.message)
+    await safe_edit_reply_markup(callback.message, undo_delete_kb(task_id))
+
+
+@router.callback_query(F.data.startswith(CB_TASK_UNDELETE_PREFIX))
+async def cb_undelete(callback: CallbackQuery):
+    task_id = callback.data.split(":", 1)[1]
+    uid = callback.from_user.id
+    task = await get_deleted_task(task_id, uid)
+    if not task:
+        await callback.answer(Messages.NO_ACCESS, show_alert=True)
+        return
+    await task.update(Set({Task.deleted_at: None}))
+    logger.info(f"Task {task.id} restored by {uid}")
+    await callback.answer(Messages.TASK_RESTORED)
+    await safe_edit_reply_markup(
+        callback.message,
+        task_actions_kb(task_id, _is_recurring(task), bool(task.due_at)),
+    )
+
+
+@router.callback_query(F.data.startswith(CB_TASK_SNOOZE_PREFIX))
+async def cb_snooze_start(callback: CallbackQuery):
+    task_id = callback.data.split(":", 1)[1]
+    task = await get_task(task_id)
+    uid = callback.from_user.id
+    if not task or not await is_task_authorized(task, uid):
+        _log_denied(task, uid, "snooze")
+        await callback.answer(Messages.NO_ACCESS, show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_reply_markup(callback.message, snooze_choice_kb(task_id))
+
+
+@router.callback_query(F.data.startswith(CB_SNOOZE_CANCEL_PREFIX))
+async def cb_snooze_cancel(callback: CallbackQuery):
+    task_id = callback.data.split(":", 1)[1]
+    task = await get_task(task_id)
+    uid = callback.from_user.id
+    if not task or not await is_task_authorized(task, uid):
+        _log_denied(task, uid, "snooze")
+        await callback.answer(Messages.NO_ACCESS, show_alert=True)
+        return
+    await callback.answer()
+    await safe_edit_reply_markup(
+        callback.message,
+        task_actions_kb(task_id, _is_recurring(task), bool(task.due_at)),
+    )
+
+
+@router.callback_query(F.data.startswith(CB_SNOOZE_APPLY_PREFIX))
+async def cb_snooze_apply(callback: CallbackQuery):
+    task_id, key = callback.data.split(":", 2)[1:]
+    task = await get_task(task_id)
+    uid = callback.from_user.id
+    if not task or not await is_task_authorized(task, uid):
+        _log_denied(task, uid, "snooze")
+        await callback.answer(Messages.NO_ACCESS, show_alert=True)
+        return
+
+    delta = DEADLINE_SHORTCUTS.get(key)
+    if delta is None:
+        await callback.answer()
+        return
+
+    new_due = datetime.now(timezone.utc) + delta
+    await task.update(Set({Task.due_at: new_due, Task.reminded: False}))
+    logger.info(f"Task {task.id} snoozed by {uid}")
+    await callback.answer(
+        Messages.TASK_SNOOZED.format(label=DEADLINE_CONFIRM_LABELS[key])
+    )
+    is_recurring = bool(task.repeat_every_days or task.repeat_weekdays)
+    await safe_edit_reply_markup(
+        callback.message, task_actions_kb(task_id, is_recurring, True)
+    )

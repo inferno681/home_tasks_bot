@@ -19,6 +19,10 @@ from bot.handlers.list_tasks import (
     cb_finish_recurring,
     cb_share_accept,
     cb_share_decline,
+    cb_snooze_apply,
+    cb_snooze_cancel,
+    cb_snooze_start,
+    cb_undelete,
     cmd_assign,
     cmd_list,
     cmd_share,
@@ -232,6 +236,18 @@ async def test_share_accept_rejects_forged_requester(mongo_db):
     )
 
 
+async def test_share_accept_rejects_malformed_requester_id(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    callback = _callback(2, f"share_yes:{task.id}:not-an-int")
+
+    await cb_share_accept(callback)
+
+    assert (await Task.get(task.id)).shared_with == []
+    callback.answer.assert_awaited_once_with(
+        Messages.INVITE_EXPIRED, show_alert=True
+    )
+
+
 async def test_share_decline_does_not_share(mongo_db):
     task = await Task(user_id=1, text="t").insert()
     callback = _callback(2, f"share_no:{task.id}:1")
@@ -258,6 +274,15 @@ async def test_share_decline_skips_notify_for_forged_requester(mongo_db):
     callback.message.edit_text.assert_awaited_once_with(
         Messages.SHARE_DECLINED, reply_markup=None
     )
+    callback.bot.send_message.assert_not_awaited()
+
+
+async def test_share_decline_rejects_malformed_requester_id(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    callback = _callback(2, f"share_no:{task.id}:not-an-int")
+
+    await cb_share_decline(callback)
+
     callback.bot.send_message.assert_not_awaited()
 
 
@@ -375,6 +400,19 @@ async def test_assign_accept_rejects_forged_requester(mongo_db):
     )
 
 
+async def test_assign_accept_rejects_malformed_requester_id(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    callback = _callback(2, f"assign_yes:{task.id}:not-an-int")
+
+    await cb_assign_accept(callback)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.assigned_to is None
+    callback.answer.assert_awaited_once_with(
+        Messages.INVITE_EXPIRED, show_alert=True
+    )
+
+
 async def test_assign_decline_does_not_assign(mongo_db):
     task = await Task(user_id=1, text="t").insert()
     callback = _callback(2, f"assign_no:{task.id}:1")
@@ -391,6 +429,15 @@ async def test_assign_decline_skips_notify_for_forged_requester(mongo_db):
     task = await Task(user_id=1, text="t").insert()
     attacker_id = 999
     callback = _callback(2, f"assign_no:{task.id}:{attacker_id}")
+
+    await cb_assign_decline(callback)
+
+    callback.bot.send_message.assert_not_awaited()
+
+
+async def test_assign_decline_rejects_malformed_requester_id(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    callback = _callback(2, f"assign_no:{task.id}:not-an-int")
 
     await cb_assign_decline(callback)
 
@@ -459,14 +506,17 @@ async def test_done_allows_shared_user(mongo_db):
     assert (await Task.get(task.id)).status == TaskStatus.DONE
 
 
-async def test_delete_removes_task(mongo_db):
+async def test_delete_soft_deletes_task(mongo_db):
     task = await Task(user_id=1, text="t").insert()
     callback = _callback(1, f"delete:{task.id}")
 
     await cb_delete(callback)
 
-    assert await Task.get(task.id) is None
-    callback.message.delete.assert_awaited_once()
+    refreshed = await Task.get(task.id)
+    assert refreshed is not None
+    assert refreshed.deleted_at is not None
+    callback.answer.assert_awaited_once_with(Messages.TASK_DELETED)
+    callback.message.edit_reply_markup.assert_awaited_once()
 
 
 async def test_delete_denies_non_authorized_user(mongo_db):
@@ -478,7 +528,149 @@ async def test_delete_denies_non_authorized_user(mongo_db):
     callback.answer.assert_awaited_once_with(
         Messages.NO_ACCESS, show_alert=True
     )
-    assert await Task.get(task.id) is not None
+    assert (await Task.get(task.id)).deleted_at is None
+
+
+async def test_deleted_task_hidden_from_list(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    task = await Task(user_id=1, text="t").insert()
+    await cb_delete(_callback(1, f"delete:{task.id}"))
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_list(message, state, CommandObject(command="list", args=""))
+
+    message.answer.assert_awaited_once_with(Messages.NO_OPEN_TASKS)
+
+
+async def test_undelete_restores_task(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    await cb_delete(_callback(1, f"delete:{task.id}"))
+    callback = _callback(1, f"undelete:{task.id}")
+
+    await cb_undelete(callback)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.deleted_at is None
+    callback.answer.assert_awaited_once_with(Messages.TASK_RESTORED)
+
+
+async def test_undelete_denies_non_authorized_user(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    await cb_delete(_callback(1, f"delete:{task.id}"))
+    callback = _callback(2, f"undelete:{task.id}")
+
+    await cb_undelete(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+    assert (await Task.get(task.id)).deleted_at is not None
+
+
+async def test_undelete_rejects_task_that_was_never_deleted(mongo_db):
+    task = await Task(user_id=1, text="t").insert()
+    callback = _callback(1, f"undelete:{task.id}")
+
+    await cb_undelete(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+
+
+async def test_snooze_start_shows_shortcut_keyboard(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="t", due_at=due).insert()
+    callback = _callback(1, f"snooze:{task.id}")
+
+    await cb_snooze_start(callback)
+
+    callback.message.edit_reply_markup.assert_awaited_once()
+    call = callback.message.edit_reply_markup.await_args
+    kb = call.kwargs["reply_markup"]
+    buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert any(b.startswith(f"snz:{task.id}:") for b in buttons)
+
+
+async def test_snooze_start_denies_non_authorized_user(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="t", due_at=due).insert()
+    callback = _callback(2, f"snooze:{task.id}")
+
+    await cb_snooze_start(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+
+
+async def test_snooze_apply_updates_due_at(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(
+        user_id=1, text="t", due_at=due, reminded=True
+    ).insert()
+    callback = _callback(1, f"snz:{task.id}:1d")
+
+    await cb_snooze_apply(callback)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.due_at > due.replace(tzinfo=None)
+    assert refreshed.reminded is False
+    callback.answer.assert_awaited_once_with(
+        Messages.TASK_SNOOZED.format(label="через 1 день")
+    )
+
+
+async def test_snooze_apply_denies_non_authorized_user(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="t", due_at=due).insert()
+    callback = _callback(2, f"snz:{task.id}:1d")
+
+    await cb_snooze_apply(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
+    assert (await Task.get(task.id)).due_at == due.replace(tzinfo=None)
+
+
+async def test_snooze_apply_rejects_unknown_shortcut(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="t", due_at=due).insert()
+    callback = _callback(1, f"snz:{task.id}:not_a_real_key")
+
+    await cb_snooze_apply(callback)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.due_at == due.replace(tzinfo=None)
+    callback.answer.assert_awaited_once()
+
+
+async def test_snooze_cancel_restores_action_keyboard(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="t", due_at=due).insert()
+    callback = _callback(1, f"snzback:{task.id}")
+
+    await cb_snooze_cancel(callback)
+
+    callback.message.edit_reply_markup.assert_awaited_once()
+    call = callback.message.edit_reply_markup.await_args
+    kb = call.kwargs["reply_markup"]
+    buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert f"done:{task.id}" in buttons
+
+
+async def test_snooze_cancel_denies_non_authorized_user(mongo_db):
+    due = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="t", due_at=due).insert()
+    callback = _callback(2, f"snzback:{task.id}")
+
+    await cb_snooze_cancel(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.NO_ACCESS, show_alert=True
+    )
 
 
 async def test_list_shows_finish_button_for_recurring_task(mongo_db):

@@ -149,6 +149,9 @@ class Messages(StrEnum):
     TASK_DONE = "Отмечено как сделано ✅"
     TASK_REPEAT_FINISHED = "Повтор завершён, задача выполнена ✅"
     TASK_DELETED = "Удалено 🗑"
+    TASK_RESTORED = "Восстановлено ✅"
+    ASK_SNOOZE = "На сколько отложить?"
+    TASK_SNOOZED = "Отложено {label} ✅"
 
     EDIT_MENU_TITLE = "Что изменить?"
     EDIT_TEXT_PROMPT = "Пришли новый текст, фото или фото с подписью."

@@ -1,18 +1,32 @@
 from typing import Optional
 
-from beanie import PydanticObjectId
-from bson.errors import InvalidId
-
 from bot.authz import is_authorized
+from bot.callback_parse import parse_object_id
 from bot.models import Pool, Task
 
 
 async def get_task(task_id: str) -> Optional[Task]:
-    try:
-        object_id = PydanticObjectId(task_id)
-    except InvalidId:
+    object_id = parse_object_id(task_id)
+    if object_id is None:
         return None
-    return await Task.get(object_id)
+    task = await Task.get(object_id)
+    if task and task.deleted_at is not None:
+        return None
+    return task
+
+
+async def get_deleted_task(task_id: str, uid: int) -> Optional[Task]:
+    """Fetch a soft-deleted task for the undo flow — the only place that
+    intentionally looks past get_task()'s "not deleted" filter."""
+    object_id = parse_object_id(task_id)
+    if object_id is None:
+        return None
+    task = await Task.get(object_id)
+    if not task or task.deleted_at is None:
+        return None
+    if not await is_task_authorized(task, uid):
+        return None
+    return task
 
 
 async def is_task_authorized(task: Task, uid: int) -> bool:

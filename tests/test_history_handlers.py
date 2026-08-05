@@ -84,6 +84,19 @@ async def test_history_ignores_open_tasks(mongo_db):
     )
 
 
+async def test_history_ignores_deleted_tasks(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    await _done_task(1, 1, deleted_at=datetime.now(timezone.utc))
+    message = _message(uid=1)
+    state = _fsm(1)
+
+    await cmd_history(message, state)
+
+    message.answer.assert_awaited_once_with(
+        Messages.HISTORY_EMPTY, reply_markup=None
+    )
+
+
 async def test_history_shows_first_page_no_nav_when_single_page(mongo_db):
     await User(user_id=1, utc_offset_minutes=0).insert()
     await _done_task(1, 1, category="garden")
@@ -191,3 +204,25 @@ async def test_history_page_callback_out_of_range_shows_empty(mongo_db):
     callback.message.edit_text.assert_awaited_once_with(
         Messages.HISTORY_EMPTY, reply_markup=None
     )
+
+
+async def test_history_page_callback_rejects_malformed_page(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    await _done_task(1, 1)
+    callback = _callback(1, "hist:not_a_number")
+
+    await cb_history_page(callback)
+
+    callback.answer.assert_awaited_once()
+    callback.message.edit_text.assert_not_awaited()
+
+
+async def test_history_page_callback_rejects_negative_page(mongo_db):
+    await User(user_id=1, utc_offset_minutes=0).insert()
+    await _done_task(1, 1)
+    callback = _callback(1, "hist:-1")
+
+    await cb_history_page(callback)
+
+    callback.answer.assert_awaited_once()
+    callback.message.edit_text.assert_not_awaited()

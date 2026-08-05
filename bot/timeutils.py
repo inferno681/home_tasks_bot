@@ -35,3 +35,16 @@ def to_local(dt_utc: datetime, offset_minutes: int) -> datetime:
 def user_offset(offset_minutes: Optional[int]) -> int:
     """Normalize a possibly-unset UTC offset (minutes) to 0."""
     return offset_minutes or 0
+
+
+def is_quiet_hour(local_hour: int, start: int, end: int) -> bool:
+    """Is `local_hour` (0-23) inside the [start, end) quiet window?
+
+    Wraps past midnight when start > end (e.g. 22..8); start == end means
+    quiet hours are effectively off (zero-width window).
+    """
+    if start == end:
+        return False
+    if start < end:
+        return start <= local_hour < end
+    return local_hour >= start or local_hour < end

@@ -266,6 +266,31 @@ async def test_accept_rejects_forged_requester(mongo_db):
     )
 
 
+async def test_accept_rejects_malformed_pool_id(mongo_db):
+    """Regression: a hand-crafted callback_data with a garbage pool id must
+    not raise InvalidId — it should be treated like an expired invite."""
+    callback = _callback(2, "pool_yes:not-an-object-id:1")
+
+    await cb_pool_invite_accept(callback)
+
+    callback.answer.assert_awaited_once_with(
+        Messages.INVITE_EXPIRED, show_alert=True
+    )
+
+
+async def test_accept_rejects_malformed_requester_id(mongo_db):
+    pool = await Pool(name="Семья", members=[1], created_by=1).insert()
+    callback = _callback(2, f"pool_yes:{pool.id}:not-an-int")
+
+    await cb_pool_invite_accept(callback)
+
+    refreshed = await Pool.get(pool.id)
+    assert refreshed.members == [1]
+    callback.answer.assert_awaited_once_with(
+        Messages.INVITE_EXPIRED, show_alert=True
+    )
+
+
 async def test_decline_does_not_add_member(mongo_db):
     pool = await Pool(name="Семья", members=[1], created_by=1).insert()
     callback = _callback(2, f"pool_no:{pool.id}:1")
@@ -290,6 +315,26 @@ async def test_decline_skips_notify_for_forged_requester(mongo_db):
     callback.message.edit_text.assert_awaited_once_with(
         Messages.POOL_DECLINED, reply_markup=None
     )
+    callback.bot.send_message.assert_not_awaited()
+
+
+async def test_decline_rejects_malformed_pool_id(mongo_db):
+    callback = _callback(2, "pool_no:not-an-object-id:1")
+
+    await cb_pool_invite_decline(callback)
+
+    callback.message.edit_text.assert_awaited_once_with(
+        Messages.POOL_DECLINED, reply_markup=None
+    )
+    callback.bot.send_message.assert_not_awaited()
+
+
+async def test_decline_rejects_malformed_requester_id(mongo_db):
+    pool = await Pool(name="Семья", members=[1], created_by=1).insert()
+    callback = _callback(2, f"pool_no:{pool.id}:not-an-int")
+
+    await cb_pool_invite_decline(callback)
+
     callback.bot.send_message.assert_not_awaited()
 
 

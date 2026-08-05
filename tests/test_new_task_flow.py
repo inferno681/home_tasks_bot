@@ -120,6 +120,35 @@ async def test_full_flow_shortcut_deadline_no_repeat(mongo_db):
     assert task.repeat_every_days is None
 
 
+async def test_deadline_shortcut_rejects_unknown_key(mongo_db):
+    """Regression: a forged callback_data (not one of the real shortcut
+    buttons) must not raise KeyError out of DEADLINE_SHORTCUTS."""
+    state = _fsm()
+    await state.set_state(NewTask.waiting_deadline)
+
+    due_cb = _callback(1, "due:not_a_real_shortcut")
+    await deadline_shortcut(due_cb, state)
+
+    assert await state.get_state() == NewTask.waiting_deadline
+    assert (await state.get_data()).get("due_at") is None
+    due_cb.answer.assert_awaited_once()
+
+
+async def test_category_picked_rejects_too_long_category(mongo_db):
+    """Regression: a forged callback_data can carry an arbitrarily long
+    category, which would otherwise blow past the 64-byte callback_data
+    limit and break the category keyboard for the whole household."""
+    state = _fsm()
+    await state.set_state(NewTask.waiting_category)
+
+    long_category = "x" * 100
+    cb = _callback(1, f"cat:{long_category}")
+    await category_picked(cb, state)
+
+    assert (await state.get_data()).get("category") is None
+    cb.answer.assert_awaited_once()
+
+
 async def test_full_flow_photo_custom_category_weekday_repeat(mongo_db):
     state = _fsm(user_id=2)
     await state.set_state(NewTask.waiting_content)
@@ -154,6 +183,32 @@ async def test_full_flow_photo_custom_category_weekday_repeat(mongo_db):
     assert task.photo_file_id == "big"
     assert task.category == "garage"
     assert task.repeat_weekdays == [0, 2]
+
+
+async def test_repeat_weekday_toggle_rejects_non_int(mongo_db):
+    state = _fsm(user_id=2)
+    await state.set_state(NewTask.waiting_repeat_weekdays)
+    await state.update_data(selected_weekdays=[])
+
+    cb = _callback(2, "wd:not_a_number")
+    await repeat_weekday_toggle(cb, state)
+
+    assert (await state.get_data())["selected_weekdays"] == []
+    cb.answer.assert_awaited_once()
+
+
+async def test_repeat_weekday_toggle_rejects_out_of_range(mongo_db):
+    """Regression: an out-of-range index must not slip into selected_
+    weekdays, or WEEKDAY_NAMES[i] raises IndexError once "Done" is hit."""
+    state = _fsm(user_id=2)
+    await state.set_state(NewTask.waiting_repeat_weekdays)
+    await state.update_data(selected_weekdays=[])
+
+    cb = _callback(2, "wd:99")
+    await repeat_weekday_toggle(cb, state)
+
+    assert (await state.get_data())["selected_weekdays"] == []
+    cb.answer.assert_awaited_once()
 
 
 async def test_repeat_days_creates_task(mongo_db):
@@ -294,6 +349,26 @@ async def test_ask_pool_on_create_inserts_pool_step(mongo_db):
 
     task = await Task.find_one(Task.user_id == 5)
     assert task.pool_id == pool.id
+
+
+async def test_pool_picked_rejects_non_member_pool(mongo_db):
+    """Regression: a forged pool_id in callback_data must not let a task
+    be attached to a pool its owner was never invited to."""
+    other_pool = await Pool(
+        name="Not yours", members=[2], created_by=2
+    ).insert()
+    state = _fsm(user_id=5)
+    await state.set_state(NewTask.waiting_pool)
+    await state.update_data(text="fix sink", photo_file_id=None)
+
+    forged_cb = _callback(5, f"task_pool:{other_pool.id}")
+    await pool_picked(forged_cb, state)
+
+    assert await state.get_state() == NewTask.waiting_pool
+    assert (await state.get_data()).get("pool_id") is None
+    forged_cb.answer.assert_awaited_once_with(
+        Messages.POOL_NOT_FOUND, show_alert=True
+    )
 
 
 async def test_silent_default_pool_applies_without_asking(mongo_db):

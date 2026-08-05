@@ -31,6 +31,12 @@ class Task(Document):
 
     completed_history: List[datetime] = Field(default_factory=list)
 
+    # Мягкое удаление — не None, значит скрыта из /list, /history,
+    # top_categories и напоминаний, но не стёрта, чтобы можно было отменить
+    # удаление. ponytail: очистки старых "мусорных" задач нет — если
+    # накопится, добавить периодическую job по deleted_at.
+    deleted_at: Optional[datetime] = None
+
     class Settings:
         name = "tasks"
 

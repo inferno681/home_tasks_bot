@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from bot.timeutils import parse_utc_offset, to_local, to_utc, user_offset
+from bot.timeutils import (
+    is_quiet_hour,
+    parse_utc_offset,
+    to_local,
+    to_utc,
+    user_offset,
+)
 
 
 def test_parse_utc_offset_positive_hours_only():
@@ -62,3 +68,24 @@ def test_user_offset_zero_stays_zero():
 
 def test_user_offset_passes_through_value():
     assert user_offset(180) == 180
+
+
+def test_is_quiet_hour_zero_width_window_disables_feature():
+    assert is_quiet_hour(23, 22, 22) is False
+    assert is_quiet_hour(3, 22, 22) is False
+
+
+def test_is_quiet_hour_simple_window():
+    assert is_quiet_hour(13, 12, 14) is True
+    assert is_quiet_hour(12, 12, 14) is True
+    assert is_quiet_hour(14, 12, 14) is False
+    assert is_quiet_hour(11, 12, 14) is False
+
+
+def test_is_quiet_hour_wraps_past_midnight():
+    assert is_quiet_hour(23, 22, 8) is True
+    assert is_quiet_hour(0, 22, 8) is True
+    assert is_quiet_hour(7, 22, 8) is True
+    assert is_quiet_hour(8, 22, 8) is False
+    assert is_quiet_hour(21, 22, 8) is False
+    assert is_quiet_hour(12, 22, 8) is False

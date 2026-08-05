@@ -151,6 +151,19 @@ async def test_field_menu_blocks_repeat_without_deadline(mongo_db):
     )
 
 
+async def test_field_menu_rejects_unknown_field(mongo_db):
+    """Regression: an unknown field key in callback_data must not raise
+    KeyError out of _FIELD_STEPS — checked before even touching the DB."""
+    task = await Task(user_id=1, text="chore").insert()
+    state = await _editing(task.id)
+    callback = _callback(1, "editf:not_a_real_field")
+
+    await cb_edit_field_picked(callback, state)
+
+    assert await state.get_state() == EditTask.waiting_field
+    callback.answer.assert_awaited_once()
+
+
 async def test_edit_text_via_plain_text_clears_photo(mongo_db):
     task = await Task(
         user_id=1, text="old", photo_file_id="old_photo"
@@ -194,6 +207,20 @@ async def test_edit_category_picked(mongo_db):
 
     refreshed = await Task.get(task.id)
     assert refreshed.category == "kitchen"
+
+
+async def test_edit_category_picked_rejects_too_long_category(mongo_db):
+    task = await Task(user_id=1, text="chore", category="old").insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_category)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, f"cat:{'x' * 100}")
+
+    await edit_category_picked(callback, state)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.category == "old"
+    callback.answer.assert_awaited_once()
 
 
 async def test_edit_category_skipped_clears_it(mongo_db):
@@ -246,6 +273,20 @@ async def test_edit_deadline_shortcut(mongo_db):
     refreshed = await Task.get(task.id)
     assert refreshed.due_at is not None
     assert refreshed.reminded is False
+
+
+async def test_edit_deadline_shortcut_rejects_unknown_key(mongo_db):
+    task = await Task(user_id=1, text="chore", due_at=None).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_deadline)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, "due:not_a_real_shortcut")
+
+    await edit_deadline_shortcut(callback, state)
+
+    refreshed = await Task.get(task.id)
+    assert refreshed.due_at is None
+    callback.answer.assert_awaited_once()
 
 
 async def test_edit_deadline_none_clears_repeat(mongo_db):
@@ -337,6 +378,20 @@ async def test_edit_repeat_weekdays(mongo_db):
     assert refreshed.repeat_every_days is None
 
 
+async def test_edit_repeat_weekday_toggle_rejects_out_of_range(mongo_db):
+    due = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    task = await Task(user_id=1, text="chore", due_at=due).insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_repeat_weekdays)
+    await state.update_data(edit_task_id=str(task.id), selected_weekdays=[])
+
+    callback = _callback(1, "wd:99")
+    await edit_repeat_weekday_toggle(callback, state)
+
+    assert (await state.get_data())["selected_weekdays"] == []
+    callback.answer.assert_awaited_once()
+
+
 async def test_edit_pool_picked(mongo_db):
     pool = await Pool(name="Семья", members=[1], created_by=1).insert()
     task = await Task(user_id=1, text="chore").insert()
@@ -361,6 +416,28 @@ async def test_edit_pool_back_to_personal(mongo_db):
     await edit_pool_picked(callback, state)
 
     assert (await Task.get(task.id)).pool_id is None
+
+
+async def test_edit_pool_picked_rejects_non_member_pool(mongo_db):
+    """Regression: the owner-only gate isn't enough on its own — the owner
+    themselves must still be a member of whichever pool they pick, or a
+    forged pool_id could attach their task to a pool they were never
+    invited to."""
+    other_pool = await Pool(
+        name="Not yours", members=[2], created_by=2
+    ).insert()
+    task = await Task(user_id=1, text="chore").insert()
+    state = _fsm(1)
+    await state.set_state(EditTask.waiting_pool)
+    await state.update_data(edit_task_id=str(task.id))
+    callback = _callback(1, f"task_pool:{other_pool.id}")
+
+    await edit_pool_picked(callback, state)
+
+    assert (await Task.get(task.id)).pool_id is None
+    callback.answer.assert_awaited_once_with(
+        Messages.POOL_NOT_FOUND, show_alert=True
+    )
 
 
 async def test_field_menu_blocks_pool_edit_for_non_owner(mongo_db):

@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from beanie.operators import And, In, Or
 
+from bot.callback_parse import parse_int
 from bot.constants import (
     CB_HISTORY_PAGE_PREFIX,
     HISTORY_PAGE_SIZE,
@@ -36,6 +37,7 @@ async def _history_tasks_for(
             Task.shared_with == uid,
         ),
         Task.status == TaskStatus.DONE,
+        Task.deleted_at == None,  # noqa: E711
     ).sort("-completed_at")
     total = await query.count()
     tasks = await query.skip(page * HISTORY_PAGE_SIZE).limit(
@@ -87,7 +89,10 @@ async def cmd_history(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith(CB_HISTORY_PAGE_PREFIX))
 async def cb_history_page(callback: CallbackQuery):
-    page = int(callback.data.split(":", 1)[1])
+    page = parse_int(callback.data.split(":", 1)[1])
+    if page is None or page < 0:
+        await callback.answer()
+        return
     text, kb = await _render_history(callback.from_user.id, page)
     await callback.answer()
     await safe_edit_text(callback.message, text, kb)

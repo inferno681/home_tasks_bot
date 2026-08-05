@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from beanie import PydanticObjectId
 from beanie.operators import AddToSet, Pull, Set
 
+from bot.callback_parse import parse_int, parse_object_id
 from bot.constants import (
     CB_POOL_INVITE_ACCEPT_PREFIX,
     CB_POOL_INVITE_DECLINE_PREFIX,
@@ -210,15 +211,17 @@ async def cmd_kick(
 @router.callback_query(F.data.startswith(CB_POOL_INVITE_ACCEPT_PREFIX))
 async def cb_pool_invite_accept(callback: CallbackQuery):
     pool_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
-    pool_id = PydanticObjectId(pool_id_raw)
-    requester_id = int(requester_id_raw)
+    pool_id = parse_object_id(pool_id_raw)
+    requester_id = parse_int(requester_id_raw)
     accepter_id = callback.from_user.id
 
-    pool = await Pool.get(pool_id)
+    pool = None if pool_id is None else await Pool.get(pool_id)
     # requester_id приходит из callback_data, которую в обход /invite можно
     # получить через подделанный /start-диплинк — перепроверяем членство
-    # по текущим данным, а не доверяем чужому вводу.
-    if not pool or requester_id not in pool.members:
+    # по текущим данным, а не доверяем чужому вводу. Оба id вдобавок могут
+    # быть просто "мусором" из руками собранного callback_data — parse_*
+    # возвращает None вместо падения с ValueError/InvalidId.
+    if not pool or requester_id is None or requester_id not in pool.members:
         await callback.answer(Messages.INVITE_EXPIRED, show_alert=True)
         return
     await pool.update(AddToSet({Pool.members: accepter_id}))
@@ -241,14 +244,15 @@ async def cb_pool_invite_accept(callback: CallbackQuery):
 @router.callback_query(F.data.startswith(CB_POOL_INVITE_DECLINE_PREFIX))
 async def cb_pool_invite_decline(callback: CallbackQuery):
     pool_id_raw, requester_id_raw = callback.data.split(":", 2)[1:]
-    requester_id = int(requester_id_raw)
+    requester_id = parse_int(requester_id_raw)
     decliner_id = callback.from_user.id
 
-    pool = await Pool.get(PydanticObjectId(pool_id_raw))
+    pool_id = parse_object_id(pool_id_raw)
+    pool = None if pool_id is None else await Pool.get(pool_id)
 
     await callback.answer()
     await safe_edit_text(callback.message, Messages.POOL_DECLINED)
-    if not pool or requester_id not in pool.members:
+    if not pool or requester_id is None or requester_id not in pool.members:
         return
     decliner = await User.find_one(User.user_id == decliner_id)
     await safe_notify(

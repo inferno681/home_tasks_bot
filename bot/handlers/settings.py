@@ -3,7 +3,6 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
-from beanie import PydanticObjectId
 from beanie.operators import Set
 
 from bot.constants import (
@@ -15,6 +14,7 @@ from bot.constants import (
 from bot.enums import Messages
 from bot.keyboards import settings_kb
 from bot.models import Pool, User
+from bot.pool_access import get_member_pool
 from bot.safe_edit import safe_edit_text
 
 logger = logging.getLogger(__name__)
@@ -70,9 +70,16 @@ async def cmd_settings(message: Message):
 @router.callback_query(F.data.startswith(CB_SETTINGS_DEFAULT_POOL_PREFIX))
 async def cb_settings_set_pool(callback: CallbackQuery):
     raw = callback.data.split(":", 1)[1]
-    pool_id = None if raw == POOL_NONE else PydanticObjectId(raw)
+    uid = callback.from_user.id
+    pool_id = None
+    if raw != POOL_NONE:
+        pool = await get_member_pool(raw, uid)
+        if not pool:
+            await callback.answer(Messages.POOL_NOT_FOUND, show_alert=True)
+            return
+        pool_id = pool.id
 
-    await User.find_one(User.user_id == callback.from_user.id).update(
+    await User.find_one(User.user_id == uid).update(
         Set({User.default_pool_id: pool_id})
     )
     await callback.answer()
