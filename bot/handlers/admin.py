@@ -22,9 +22,15 @@ async def cmd_stats(message: Message):
 
     users = await User.find().count()
     pools = await Pool.find().count()
-    tasks = await Task.find().count()
-    pending = await Task.find(Task.status == TaskStatus.PENDING).count()
-    done = await Task.find(Task.status == TaskStatus.DONE).count()
+    tasks = await Task.find(Task.deleted_at == None).count()  # noqa: E711
+    pending = await Task.find(
+        Task.status == TaskStatus.PENDING,
+        Task.deleted_at == None,  # noqa: E711
+    ).count()
+    done = await Task.find(
+        Task.status == TaskStatus.DONE,
+        Task.deleted_at == None,  # noqa: E711
+    ).count()
 
     await message.answer(
         Messages.STATS.format(

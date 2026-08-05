@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,4 +51,25 @@ async def test_stats_shows_counts_for_admin(mongo_db, monkeypatch):
 
     message.answer.assert_awaited_once_with(
         Messages.STATS.format(users=2, pools=1, tasks=2, pending=1, done=1)
+    )
+
+
+async def test_stats_excludes_soft_deleted_tasks(mongo_db, monkeypatch):
+    """Regression: /stats must not count tasks the user has thrown away —
+    a soft-deleted task previously still showed up as open/total."""
+    monkeypatch.setattr(config.secrets, "admin_id", 1)
+    await User(user_id=1).insert()
+    await Task(user_id=1, text="alive", status=TaskStatus.PENDING).insert()
+    await Task(
+        user_id=1,
+        text="deleted",
+        status=TaskStatus.PENDING,
+        deleted_at=datetime.now(timezone.utc),
+    ).insert()
+    message = _message(1)
+
+    await cmd_stats(message)
+
+    message.answer.assert_awaited_once_with(
+        Messages.STATS.format(users=1, pools=0, tasks=1, pending=1, done=0)
     )
