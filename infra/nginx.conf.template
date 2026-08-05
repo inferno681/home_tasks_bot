@@ -5,19 +5,25 @@
 # при публикации порта контейнера на хост).
 
 server {
-    listen 80;
+    # default_server: любой запрос с чужим/пустым Host на этот порт (голый IP,
+    # сканер) должен попадать именно сюда, а не в чей-то ещё vhost на сервере.
+    listen 80 default_server;
     server_name ${DOMAIN};
     return 301 https://$host$request_uri;
 }
 
 server {
-    listen 443 ssl;
+    listen 443 ssl default_server;
     http2 on;
     server_name ${DOMAIN};
     server_tokens off;
 
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    # HTTPS и так обязателен (порт 80 всегда редиректит), это только против
+    # sslstrip при самом первом заходе клиента без сохранённого HSTS.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_body_timeout 10s;
     client_header_timeout 10s;
