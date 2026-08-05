@@ -110,3 +110,17 @@ def test_fsm_storage_rejects_unknown_backend(monkeypatch):
     monkeypatch.setenv("MONGO_URI", "mongodb://x")
     with pytest.raises(ValidationError):
         FSMSettings(storage="postgres", mongo_collection="fsm_states")
+
+
+def test_admin_id_defaults_to_none(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    monkeypatch.setenv("MONGO_URI", "mongodb://x")
+    monkeypatch.delenv("ADMIN_ID", raising=False)
+    assert Secrets().admin_id is None
+
+
+def test_admin_id_parses_from_env(monkeypatch):
+    monkeypatch.setenv("BOT_TOKEN", "token")
+    monkeypatch.setenv("MONGO_URI", "mongodb://x")
+    monkeypatch.setenv("ADMIN_ID", "12345")
+    assert Secrets().admin_id == 12345

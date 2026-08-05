@@ -13,6 +13,7 @@ from aiohttp import web
 from bot.db import init_db
 from bot.fsm_storage import build_fsm_storage
 from bot.handlers import (
+    admin,
     common,
     edit_task,
     history,
@@ -41,6 +42,7 @@ def setup_bot_and_dispatcher() -> tuple[Bot, Dispatcher]:
     dp.include_router(edit_task.router)
     dp.include_router(pools.router)
     dp.include_router(settings.router)
+    dp.include_router(admin.router)
 
     bot = Bot(token=config.secrets.bot_token.get_secret_value())
     return bot, dp

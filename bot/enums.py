@@ -202,3 +202,12 @@ class Messages(StrEnum):
     SETTINGS_ASK_NO = "нет"
     SETTINGS_DEFAULT_POOL_SAVED = "Пул по умолчанию: {pool}."
     SETTINGS_ASK_TOGGLED = "Готово."
+
+    ADMIN_ONLY = "Команда только для администратора."
+    ADMIN_NEW_USER = "🆕 Новый пользователь: {username} (id {user_id})"
+    STATS = (
+        "📊 Статистика\n"
+        "Пользователи: {users}\n"
+        "Пулы: {pools}\n"
+        "Задачи: {tasks} (открыто: {pending}, выполнено: {done})"
+    )

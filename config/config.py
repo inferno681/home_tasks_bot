@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, SecretStr, model_validator
@@ -61,6 +61,9 @@ class Secrets(BaseSettings):
     redis_password: SecretStr = Field(
         default=SecretStr(""), alias="REDIS_PASSWORD"
     )
+    # Telegram user_id получателя уведомлений о новых пользователях и
+    # единственного, кому доступен /stats; не задан — обе фичи молчат.
+    admin_id: Optional[int] = Field(default=None, alias="ADMIN_ID")
 
     @model_validator(mode="after")
     def check_required_secrets(self):
