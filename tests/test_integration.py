@@ -15,7 +15,6 @@ from bot.scheduler import (
     check_reminders,
     setup_scheduler,
 )
-from config.config import config
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -122,52 +121,58 @@ async def test_check_reminders_ignores_deleted_tasks(mongo_db):
     assert (await Task.get(task.id)).reminded is False
 
 
-async def test_is_quiet_for_respects_local_hour(mongo_db, monkeypatch):
-    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", True)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_start", 22)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_end", 8)
+async def test_is_quiet_for_respects_local_hour(mongo_db):
     # 02:00 UTC == 05:00 local at +3 -- inside the 22..8 quiet window.
     now = datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc)
-    await User(user_id=1, utc_offset_minutes=180).insert()
+    await User(
+        user_id=1,
+        utc_offset_minutes=180,
+        quiet_hours_enabled=True,
+        quiet_hours_start=22,
+        quiet_hours_end=8,
+    ).insert()
 
     assert await _is_quiet_for(1, now) is True
 
 
-async def test_is_quiet_for_false_outside_window(mongo_db, monkeypatch):
-    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", True)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_start", 22)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_end", 8)
+async def test_is_quiet_for_false_outside_window(mongo_db):
     # 10:00 UTC == 13:00 local at +3 -- outside the 22..8 quiet window.
     now = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
-    await User(user_id=1, utc_offset_minutes=180).insert()
+    await User(
+        user_id=1,
+        utc_offset_minutes=180,
+        quiet_hours_enabled=True,
+        quiet_hours_start=22,
+        quiet_hours_end=8,
+    ).insert()
 
     assert await _is_quiet_for(1, now) is False
 
 
-async def test_is_quiet_for_off_when_disabled(mongo_db, monkeypatch):
-    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", False)
+async def test_is_quiet_for_off_when_disabled(mongo_db):
     now = datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc)
-    await User(user_id=1, utc_offset_minutes=180).insert()
+    await User(
+        user_id=1, utc_offset_minutes=180, quiet_hours_enabled=False
+    ).insert()
 
     assert await _is_quiet_for(1, now) is False
 
 
-async def test_is_quiet_for_defaults_missing_user_to_utc(
-    mongo_db, monkeypatch
-):
-    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", True)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_start", 22)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_end", 8)
+async def test_is_quiet_for_false_when_user_missing(mongo_db):
+    """No User document means no way to have opted into quiet hours."""
     now = datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc)
 
-    assert await _is_quiet_for(999, now) is True
+    assert await _is_quiet_for(999, now) is False
 
 
-async def test_send_reminder_skips_during_quiet_hours(mongo_db, monkeypatch):
-    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", True)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_start", 22)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_end", 8)
-    await User(user_id=1, utc_offset_minutes=0).insert()
+async def test_send_reminder_skips_during_quiet_hours(mongo_db):
+    await User(
+        user_id=1,
+        utc_offset_minutes=0,
+        quiet_hours_enabled=True,
+        quiet_hours_start=22,
+        quiet_hours_end=8,
+    ).insert()
     task = await Task(user_id=1, text="t").insert()
     now = datetime(2026, 1, 1, 23, 0, tzinfo=timezone.utc)
     fake_bot = AsyncMock()
@@ -178,16 +183,17 @@ async def test_send_reminder_skips_during_quiet_hours(mongo_db, monkeypatch):
     fake_bot.send_message.assert_not_awaited()
 
 
-async def test_check_reminders_skips_during_quiet_hours(mongo_db, monkeypatch):
+async def test_check_reminders_skips_during_quiet_hours(mongo_db):
     """End-to-end: quiet hours computed relative to real "now" so this
     isn't sensitive to when in the day the test suite happens to run."""
     now_hour = datetime.now(timezone.utc).hour
-    monkeypatch.setattr(config.scheduler, "quiet_hours_enabled", True)
-    monkeypatch.setattr(config.scheduler, "quiet_hours_start", now_hour)
-    monkeypatch.setattr(
-        config.scheduler, "quiet_hours_end", (now_hour + 1) % 24
-    )
-    await User(user_id=1, utc_offset_minutes=0).insert()
+    await User(
+        user_id=1,
+        utc_offset_minutes=0,
+        quiet_hours_enabled=True,
+        quiet_hours_start=now_hour,
+        quiet_hours_end=(now_hour + 1) % 24,
+    ).insert()
     task = await Task(
         user_id=1,
         text="quiet",

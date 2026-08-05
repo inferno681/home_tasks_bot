@@ -27,6 +27,8 @@ from bot.constants import (
     CB_REPEAT_WEEKDAYS,
     CB_SETTINGS_ASK_TOGGLE,
     CB_SETTINGS_DEFAULT_POOL_PREFIX,
+    CB_SETTINGS_QUIET_PERIOD,
+    CB_SETTINGS_QUIET_TOGGLE,
     CB_SHARE_ACCEPT_PREFIX,
     CB_SHARE_DECLINE_PREFIX,
     CB_SNOOZE_APPLY_PREFIX,
@@ -58,6 +60,9 @@ from bot.constants import (
     MAIN_MENU_LABELS,
     POOL_NONE,
     POOL_PERSONAL_LABEL,
+    QUIET_HOURS_OFF_TOGGLE,
+    QUIET_HOURS_ON_TOGGLE,
+    QUIET_HOURS_PERIOD_BUTTON,
     REPEAT_DAYS_LABEL,
     REPEAT_NONE_LABEL,
     REPEAT_WEEKDAYS_LABEL,
@@ -251,6 +256,7 @@ def settings_kb(
     pools: Iterable[Pool],
     default_pool_id: Optional[PydanticObjectId],
     ask_pool_on_create: bool,
+    quiet_hours_enabled: bool,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     personal_mark = "✅ " if default_pool_id is None else ""
@@ -270,6 +276,17 @@ def settings_kb(
         else SETTINGS_ASK_ON_TOGGLE
     )
     builder.button(text=toggle_label, callback_data=CB_SETTINGS_ASK_TOGGLE)
+    quiet_toggle_label = (
+        QUIET_HOURS_OFF_TOGGLE
+        if quiet_hours_enabled
+        else QUIET_HOURS_ON_TOGGLE
+    )
+    builder.button(
+        text=quiet_toggle_label, callback_data=CB_SETTINGS_QUIET_TOGGLE
+    )
+    builder.button(
+        text=QUIET_HOURS_PERIOD_BUTTON, callback_data=CB_SETTINGS_QUIET_PERIOD
+    )
     builder.adjust(1)
     return builder.as_markup()
 

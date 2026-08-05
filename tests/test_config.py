@@ -29,12 +29,7 @@ def _app_config(secrets: Secrets, **service_kwargs) -> AppConfig:
     return AppConfig(
         service=_service(**service_kwargs),
         mongodb=MongoSettings(db="home_tasks"),
-        scheduler=SchedulerSettings(
-            interval_seconds=60,
-            quiet_hours_enabled=True,
-            quiet_hours_start=22,
-            quiet_hours_end=8,
-        ),
+        scheduler=SchedulerSettings(interval_seconds=60),
         fsm=FSMSettings(storage="memory", mongo_collection="fsm_states"),
         redis=RedisSettings(host="localhost", port=6379, db=0),
         logger=LoggerSettings(level="INFO", format="%(message)s"),

@@ -51,6 +51,12 @@ class User(Document):
     # Спрашивать пул явно при /new, а не молча брать default_pool_id.
     ask_pool_on_create: bool = False
 
+    # Часы (0-23) по локальному времени пользователя, когда напоминания не
+    # шлются; выключено по умолчанию — включается и настраивается в /settings.
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: int = 22
+    quiet_hours_end: int = 8
+
     class Settings:
         name = "users"
 

@@ -4,6 +4,7 @@ from datetime import timedelta
 # ponytail: фиксированное смещение вместо zoneinfo — не учитывает переход на
 # летнее/зимнее время; апгрейд на IANA-таймзону, если это станет проблемой.
 OFFSET_RE = re.compile(r"^([+-])(\d{1,2})(?::(\d{2}))?$")
+QUIET_HOURS_RE = re.compile(r"^(\d{1,2})-(\d{1,2})$")
 
 MENU_NEW = "📝 Новая задача"
 MENU_LIST = "📋 Список задач"
@@ -58,6 +59,9 @@ DECLINE_BUTTON = "❌ Отклонить"
 POOL_PERSONAL_LABEL = "🔒 Мои (личные)"
 SETTINGS_ASK_ON_TOGGLE = "🔀 Спрашивать пул при создании"
 SETTINGS_ASK_OFF_TOGGLE = "🔕 Не спрашивать (тихий дефолт)"
+QUIET_HOURS_ON_TOGGLE = "🔔 Включить тихие часы"
+QUIET_HOURS_OFF_TOGGLE = "🔕 Выключить тихие часы"
+QUIET_HOURS_PERIOD_BUTTON = "🕒 Период тихих часов"
 HISTORY_PREV_LABEL = "◀️"
 HISTORY_NEXT_LABEL = "▶️"
 HISTORY_PAGE_SIZE = 5
@@ -101,6 +105,8 @@ CB_ASSIGN_DECLINE_PREFIX = "assign_no:"
 CB_TASK_POOL_PREFIX = "task_pool:"
 CB_SETTINGS_DEFAULT_POOL_PREFIX = "set_pool:"
 CB_SETTINGS_ASK_TOGGLE = "set_ask_toggle"
+CB_SETTINGS_QUIET_TOGGLE = "set_quiet_toggle"
+CB_SETTINGS_QUIET_PERIOD = "set_quiet_period"
 CB_HISTORY_PAGE_PREFIX = "hist:"
 
 # --- /start deep-link payloads: Telegram допускает только [A-Za-z0-9_-],

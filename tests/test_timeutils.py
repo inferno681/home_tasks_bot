@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from bot.timeutils import (
     is_quiet_hour,
+    parse_quiet_hours_period,
     parse_utc_offset,
     to_local,
     to_utc,
@@ -89,3 +90,24 @@ def test_is_quiet_hour_wraps_past_midnight():
     assert is_quiet_hour(8, 22, 8) is False
     assert is_quiet_hour(21, 22, 8) is False
     assert is_quiet_hour(12, 22, 8) is False
+
+
+def test_parse_quiet_hours_period_valid():
+    assert parse_quiet_hours_period("22-8") == (22, 8)
+
+
+def test_parse_quiet_hours_period_strips_whitespace():
+    assert parse_quiet_hours_period("  22-8  ") == (22, 8)
+
+
+def test_parse_quiet_hours_period_rejects_garbage():
+    assert parse_quiet_hours_period("not a period") is None
+
+
+def test_parse_quiet_hours_period_rejects_out_of_range():
+    assert parse_quiet_hours_period("24-8") is None
+    assert parse_quiet_hours_period("22-24") is None
+
+
+def test_parse_quiet_hours_period_accepts_boundary_values():
+    assert parse_quiet_hours_period("0-23") == (0, 23)

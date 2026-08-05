@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
-from bot.constants import OFFSET_RE
+from bot.constants import OFFSET_RE, QUIET_HOURS_RE
 
 
 def parse_utc_offset(text: str) -> Optional[int]:
@@ -35,6 +35,19 @@ def to_local(dt_utc: datetime, offset_minutes: int) -> datetime:
 def user_offset(offset_minutes: Optional[int]) -> int:
     """Normalize a possibly-unset UTC offset (minutes) to 0."""
     return offset_minutes or 0
+
+
+def parse_quiet_hours_period(text: str) -> Optional[Tuple[int, int]]:
+    """Parse "22-8" into (22, 8). Returns None if malformed or out of
+    the 0-23 range for either side."""
+    match = QUIET_HOURS_RE.match(text.strip())
+    if not match:
+        return None
+    start = int(match.group(1))
+    end = int(match.group(2))
+    if not (0 <= start <= 23 and 0 <= end <= 23):
+        return None
+    return start, end
 
 
 def is_quiet_hour(local_hour: int, start: int, end: int) -> bool:

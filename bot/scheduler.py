@@ -23,15 +23,12 @@ async def _reminder_recipients(task: Task) -> list[int]:
 
 
 async def _is_quiet_for(recipient: int, now: datetime) -> bool:
-    if not config.scheduler.quiet_hours_enabled:
-        return False
     user = await User.find_one(User.user_id == recipient)
-    offset = user_offset(user.utc_offset_minutes if user else None)
-    local_hour = to_local(now, offset).hour
+    if not user or not user.quiet_hours_enabled:
+        return False
+    local_hour = to_local(now, user_offset(user.utc_offset_minutes)).hour
     return is_quiet_hour(
-        local_hour,
-        config.scheduler.quiet_hours_start,
-        config.scheduler.quiet_hours_end,
+        local_hour, user.quiet_hours_start, user.quiet_hours_end
     )
 
 

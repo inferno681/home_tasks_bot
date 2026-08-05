@@ -197,14 +197,23 @@ class Messages(StrEnum):
     ASK_TASK_POOL = "В какой пул добавить задачу?"
     TASK_POOL_LABEL = "Пул: {pool}"
 
-    SETTINGS_TITLE = "Настройки создания задач:"
+    SETTINGS_TITLE = "Настройки:"
     SETTINGS_CURRENT = (
-        "Пул по умолчанию: {pool}\nСпрашивать пул при /new: {ask}"
+        "Пул по умолчанию: {pool}\n"
+        "Спрашивать пул при /new: {ask}\n"
+        "Тихие часы: {quiet}"
     )
     SETTINGS_ASK_YES = "да"
     SETTINGS_ASK_NO = "нет"
     SETTINGS_DEFAULT_POOL_SAVED = "Пул по умолчанию: {pool}."
     SETTINGS_ASK_TOGGLED = "Готово."
+    QUIET_HOURS_OFF_LABEL = "выкл"
+    QUIET_HOURS_ON_LABEL = "{start:02d}:00–{end:02d}:00"
+    ASK_QUIET_HOURS_PERIOD = (
+        "Пришли период в формате ЧЧ-ЧЧ, например 22-8 (с 22:00 до 08:00)."
+    )
+    INVALID_QUIET_HOURS_PERIOD = "Не понял. Пример: 22-8, часы 0-23."
+    QUIET_HOURS_PERIOD_SAVED = "Тихие часы: {start:02d}:00–{end:02d}:00."
 
     ADMIN_ONLY = "Команда только для администратора."
     ADMIN_NEW_USER = "🆕 Новый пользователь: {username} (id {user_id})"

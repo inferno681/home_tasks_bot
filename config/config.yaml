@@ -10,9 +10,6 @@ mongodb:
 
 scheduler:
   interval_seconds: 60
-  quiet_hours_enabled: true
-  quiet_hours_start: 22
-  quiet_hours_end: 8
 
 # storage: memory (по умолчанию, ничего не нужно) | redis | mongo (переиспользует
 # соединение к Atlas из bot/db.py, отдельная коллекция fsm.mongo_collection)

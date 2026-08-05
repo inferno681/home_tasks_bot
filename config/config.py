@@ -33,12 +33,6 @@ class SchedulerSettings(BaseModel):
     """Reminder scheduler settings."""
 
     interval_seconds: int
-    # Локальные часы получателя (0-23), в которые напоминания не шлются;
-    # start==end выключает фичу. start > end оборачивается через полночь
-    # (22..8 — обычный ночной случай).
-    quiet_hours_enabled: bool
-    quiet_hours_start: int = Field(ge=0, le=23)
-    quiet_hours_end: int = Field(ge=0, le=23)
 
 
 class FSMSettings(BaseModel):
